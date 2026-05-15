@@ -37,16 +37,16 @@ class _LocalS3:
             pass
 
     def get_object(self, **kw):
-        path = DATA_DIR / kw["Key"]
+        path = ROOT / kw["Key"]
         if not path.exists():
             raise self.exceptions.NoSuchKey()
         return {"Body": path.read_bytes()}
 
     def put_object(self, **kw):
         body = kw["Body"]
-        (DATA_DIR / kw["Key"]).write_bytes(
-            body.encode() if isinstance(body, str) else body
-        )
+        path = ROOT / kw["Key"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body.encode() if isinstance(body, str) else body)
 
 
 def run_prober():
@@ -87,8 +87,8 @@ class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
         path = path.split("?", 1)[0].split("#", 1)[0]
         if path.startswith("/data/") or path == "/data":
-            rel = path[6:].lstrip("/")
-            return str(DATA_DIR / rel) if rel else str(DATA_DIR)
+            rel = path.lstrip("/")
+            return str(ROOT / rel) if rel else str(DATA_DIR)
         rel = path.lstrip("/")
         return str(FRONTEND_DIR / rel) if rel else str(FRONTEND_DIR)
 

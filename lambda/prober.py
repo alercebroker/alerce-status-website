@@ -132,7 +132,7 @@ def update_history(s3, snapshot):
     }
     """
     try:
-        obj = s3.get_object(Bucket=BUCKET, Key="history.json")
+        obj = s3.get_object(Bucket=BUCKET, Key="data/history.json")
         history = json.loads(obj["Body"].read())
     except s3.exceptions.NoSuchKey:
         history = {}
@@ -161,7 +161,7 @@ def update_history(s3, snapshot):
 
     s3.put_object(
         Bucket=BUCKET,
-        Key="history.json",
+        Key="data/history.json",
         Body=json.dumps(history, separators=(",", ":")),
         ContentType="application/json",
         CacheControl="no-cache",
@@ -189,7 +189,7 @@ def handler(event, context):
 
     s3.put_object(
         Bucket=BUCKET,
-        Key="status.json",
+        Key="data/status.json",
         Body=json.dumps(snapshot, separators=(",", ":")),
         ContentType="application/json",
         CacheControl="no-cache",
