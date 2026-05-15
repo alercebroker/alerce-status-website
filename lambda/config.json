@@ -8,6 +8,7 @@
       "id": "api-ztf-objects",
       "label": "ZTF Object API",
       "group": "apis",
+      "description": "Queries metadata for ZTF alert objects (name, coordinates, first/last detection).",
       "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp",
       "method": "GET",
       "expected_status": [200, 404]
@@ -16,6 +17,7 @@
       "id": "api-ztf-lightcurve",
       "label": "ZTF Lightcurve API",
       "group": "apis",
+      "description": "Returns detections and non-detections (the photometric light curve) for a ZTF object.",
       "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/lightcurve",
       "method": "GET",
       "expected_status": [200, 404]
@@ -24,6 +26,7 @@
       "id": "api-ztf-magstats",
       "label": "ZTF Magstats API",
       "group": "apis",
+      "description": "Per-band magnitude statistics (min, max, mean) for a ZTF object.",
       "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/magstats",
       "method": "GET",
       "expected_status": [200, 404]
@@ -32,6 +35,7 @@
       "id": "api-ztf-probabilities",
       "label": "ZTF Probabilities API",
       "group": "apis",
+      "description": "Classifier probabilities (e.g. SN, AGN, variable star) for a ZTF object.",
       "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/probabilities",
       "method": "GET",
       "expected_status": [200, 404]
@@ -40,6 +44,7 @@
       "id": "api-ztf-features",
       "label": "ZTF Features API",
       "group": "apis",
+      "description": "Light-curve features used as input to ALeRCE classifiers.",
       "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/features",
       "method": "GET",
       "expected_status": [200, 404]
@@ -48,6 +53,7 @@
       "id": "api-ztf-classifiers",
       "label": "ZTF Classifiers API",
       "group": "apis",
+      "description": "Lists the available ZTF classifiers and their output classes.",
       "url": "https://api.alerce.online/ztf/v1/classifiers",
       "method": "GET",
       "expected_status": [200]
@@ -56,6 +62,7 @@
       "id": "api-ztf-forced-photometry",
       "label": "ZTF Forced Photometry API",
       "group": "apis",
+      "description": "Forced-photometry light curves (flux measured at a fixed position) for ZTF objects.",
       "url": "https://api.alerce.online/v2/lightcurve/forced-photometry/ZTF18aarunpp",
       "method": "GET",
       "expected_status": [200]
@@ -64,6 +71,7 @@
       "id": "api-lsst-objects",
       "label": "Multi-survey Object API",
       "group": "apis",
+      "description": "Object metadata API for the multi-survey (LSST-era) backend.",
       "url": "https://api-lsst.alerce.online/object_api/openapi.json",
       "method": "GET",
       "expected_status": [200]
@@ -72,6 +80,7 @@
       "id": "api-lsst-lightcurve",
       "label": "Multi-survey Lightcurve API",
       "group": "apis",
+      "description": "Light-curve API for the multi-survey (LSST-era) backend.",
       "url": "https://api-lsst.alerce.online/lightcurve_api/openapi.json",
       "method": "GET",
       "expected_status": [200]
@@ -80,6 +89,7 @@
       "id": "api-lsst-probability",
       "label": "Multi-survey Probability API",
       "group": "apis",
+      "description": "Classifier probabilities API for the multi-survey (LSST-era) backend.",
       "url": "https://api-lsst.alerce.online/probability_api/openapi.json",
       "method": "GET",
       "expected_status": [200]
@@ -88,6 +98,7 @@
       "id": "api-lsst-stamps",
       "label": "Multi-survey Stamps API",
       "group": "apis",
+      "description": "Image stamps (science, reference, difference) for multi-survey objects.",
       "url": "https://api-lsst.alerce.online/stamps_api/openapi.json",
       "method": "GET",
       "expected_status": [200]
@@ -96,6 +107,7 @@
       "id": "api-stamps",
       "label": "ZTF Stamps API",
       "group": "apis",
+      "description": "Image stamps (science, reference, difference) for ZTF alerts.",
       "url": "https://avro.alerce.online",
       "method": "GET",
       "expected_status": [200, 404]
@@ -104,6 +116,7 @@
       "id": "api-crossmatch",
       "label": "Crossmatch API",
       "group": "apis",
+      "description": "Cone-search crossmatch against external catalogs (Gaia, AllWISE, etc.).",
       "url": "https://catshtm.alerce.online/conesearch_all?catalog=GAIA%2FDR2&ra=148.8222&dec=69.0654&radius=10",
       "method": "GET",
       "expected_status": [200]
@@ -112,6 +125,7 @@
       "id": "frontend-explorer",
       "label": "ALeRCE Explorer",
       "group": "frontends",
+      "description": "Web interface for searching, visualizing, and inspecting ALeRCE alert objects.",
       "url": "https://alerce.online",
       "method": "GET",
       "expected_status": [200]
@@ -120,6 +134,7 @@
       "id": "frontend-docs",
       "label": "Python Client Docs",
       "group": "frontends",
+      "description": "Documentation for the alerce-client Python library on Read the Docs.",
       "url": "https://alerce.readthedocs.io",
       "method": "GET",
       "expected_status": [200]

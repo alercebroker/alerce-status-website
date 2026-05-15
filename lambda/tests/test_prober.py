@@ -51,6 +51,26 @@ def test_non_operational_components_have_diagnostic_fields():
     assert degraded["response_ms"] == 3000
 
 
+def test_description_propagates_to_snapshot():
+    """Component descriptions in config should round-trip into the snapshot."""
+    config = {
+        "thresholds": THRESHOLDS,
+        "components": [
+            {"id": "api-object", "label": "Object API", "group": "apis",
+             "description": "Object metadata API.",
+             "url": "https://example.com", "method": "GET", "expected_status": [200]},
+            {"id": "api-no-desc", "label": "No Desc", "group": "apis",
+             "url": "https://example.com", "method": "GET", "expected_status": [200]},
+        ],
+    }
+    results = [_make_result("api-object", "Object API", "operational"),
+               _make_result("api-no-desc", "No Desc", "operational")]
+    snapshot = prober.build_snapshot(results, config)
+    by_id = {c["id"]: c for c in snapshot["components"]}
+    assert by_id["api-object"]["description"] == "Object metadata API."
+    assert "description" not in by_id["api-no-desc"]
+
+
 def test_snapshot_fields():
     results = [_make_result("api-object", "Object API", "operational"),
                _make_result("api-lightcurve", "Lightcurve API", "operational")]

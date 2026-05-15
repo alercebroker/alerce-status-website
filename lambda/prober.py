@@ -100,6 +100,8 @@ def build_snapshot(probe_results, config):
             "status_label": _group_label(status),
             "checked_at": now_iso,
         }
+        if comp.get("description"):
+            entry["description"] = comp["description"]
         if status != "operational":
             entry["probe_url"] = r["url"] if r else comp["url"]
             if r and r["http_code"] is not None:

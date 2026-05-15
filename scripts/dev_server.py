@@ -66,7 +66,7 @@ def run_prober():
     s3 = _LocalS3()
     s3.put_object(
         Bucket="local",
-        Key="status.json",
+        Key="data/status.json",
         Body=json.dumps(snapshot, separators=(",", ":")),
         ContentType="application/json",
     )

@@ -5,7 +5,7 @@ const POLL_STATUS_MS  = 30_000;
 const POLL_HISTORY_MS = 60_000;
 const POLL_INCIDENTS_MS = 60_000;
 const HISTORY_BUCKETS = 90 * 24 * 60 / 5; // 90 days of 5-min buckets (max)
-const DISPLAY_BUCKETS = 60; // how many bars to show in the UI
+const DISPLAY_DAYS = 30; // each bar = one day, colored by the worst status seen that day
 
 let history  = {};
 let incidents = [];
@@ -61,14 +61,19 @@ function renderComponents(snapshot) {
         </details>`;
     }
 
+    const info = comp.description
+      ? `<span class="info" tabindex="0" title="${esc(comp.description)}" aria-label="${esc(comp.description)}">?</span>`
+      : "";
+
     const row = document.createElement("div");
     row.className = "component-row";
     row.innerHTML = `
       <div class="component-left">
         <div class="status-dot ${cls}"></div>
         <span class="component-name">${esc(comp.label)}</span>
+        ${info}
       </div>
-      <div class="uptime-bar">${bar}<span class="pct">${uptimePct(comp.id)}</span></div>
+      <div class="uptime-bar">${bar}</div>
       <span class="status-text ${cls}">${esc(comp.status_label)}</span>
       ${detailsHtml}
     `;
@@ -76,25 +81,53 @@ function renderComponents(snapshot) {
   }
 }
 
+// Aggregate raw 5-min buckets into DISPLAY_DAYS daily slots, oldest first.
+// Each slot's status is the worst seen that UTC day; days with no data stay "unknown".
+function aggregateDaily(componentId) {
+  const rank = { unknown: 0, operational: 1, degraded: 2, outage: 3 };
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  const slots = [];
+  for (let i = DISPLAY_DAYS - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    slots.push({ date: d.toISOString().slice(0, 10), status: "unknown" });
+  }
+  const indexByDate = Object.fromEntries(slots.map((s, i) => [s.date, i]));
+
+  for (const b of history[componentId] || []) {
+    const day = (b.ts || "").slice(0, 10);
+    const idx = indexByDate[day];
+    if (idx === undefined) continue;
+    const cur = slots[idx].status;
+    if ((rank[b.status] ?? 0) > rank[cur]) slots[idx].status = b.status;
+  }
+  return slots;
+}
+
 function buildUptimeBar(componentId) {
-  const buckets = (history[componentId] || []).slice(-DISPLAY_BUCKETS);
-  // Pad left with empty buckets so bar is always full width
-  const padded = Array(DISPLAY_BUCKETS - buckets.length).fill(null).concat(buckets);
-  return '<div class="buckets">' +
-    padded.map(b => {
-      const cls = b ? statusClass(b.status) : "";
-      const title = b ? `${b.ts}: ${b.status}` : "no data";
-      return `<div class="bucket ${cls}" title="${esc(title)}"></div>`;
-    }).join("") +
-    '</div>';
+  const days = aggregateDaily(componentId);
+  const bars = days.map(d => {
+    const cls = d.status === "unknown" ? "" : statusClass(d.status);
+    const title = d.status === "unknown" ? `${d.date}: no data` : `${d.date}: ${d.status}`;
+    return `<div class="bucket ${cls}" title="${esc(title)}"></div>`;
+  }).join("");
+  const pct = uptimePct(componentId);
+  return `<div class="buckets">${bars}</div>` +
+         `<div class="bar-axis">` +
+           `<span>${DISPLAY_DAYS} days ago</span>` +
+           `<span class="pct">Uptime: ${pct}</span>` +
+           `<span>Today</span>` +
+         `</div>`;
 }
 
 function uptimePct(componentId) {
-  const buckets = history[componentId];
-  if (!buckets || buckets.length === 0) return "";
-  const ok = buckets.filter(b => b.status === "operational").length;
-  const pct = (ok / buckets.length * 100).toFixed(1);
-  return pct + "%";
+  const days = aggregateDaily(componentId);
+  const known = days.filter(d => d.status !== "unknown");
+  if (known.length === 0) return "—";
+  const ok = known.filter(d => d.status === "operational").length;
+  return (ok / known.length * 100).toFixed(1) + "%";
 }
 
 function renderIncidents() {
