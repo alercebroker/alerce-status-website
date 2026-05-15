@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ALeRCE Status</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔭</text></svg>">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header>
+  <div class="inner">
+    <span class="logo">🔭</span>
+    <h1>ALeRCE Status</h1>
+  </div>
+</header>
+
+<main>
+
+  <!-- Overall banner -->
+  <div id="banner" class="banner operational">
+    <div class="dot"></div>
+    <span>Loading…</span>
+  </div>
+
+  <!-- Stale data warning (hidden until needed) -->
+  <div id="stale-warning" class="stale-warning" style="display:none"></div>
+
+  <!-- Public APIs -->
+  <div class="card">
+    <div class="card-title">Public APIs</div>
+    <div id="apis-rows">
+      <!-- populated by app.js -->
+      <div class="component-row"><div class="skeleton skeleton-row" style="width:60%"></div></div>
+      <div class="component-row"><div class="skeleton skeleton-row" style="width:50%"></div></div>
+      <div class="component-row"><div class="skeleton skeleton-row" style="width:55%"></div></div>
+    </div>
+  </div>
+
+  <!-- Frontends & Docs -->
+  <div class="card">
+    <div class="card-title">Frontends &amp; Docs</div>
+    <div id="frontends-rows">
+      <div class="component-row"><div class="skeleton skeleton-row" style="width:45%"></div></div>
+      <div class="component-row"><div class="skeleton skeleton-row" style="width:40%"></div></div>
+    </div>
+  </div>
+
+  <!-- Incidents & Maintenance -->
+  <div class="card">
+    <div class="card-title">Incidents &amp; Maintenance</div>
+    <div id="incidents-list">
+      <div class="incident"><div class="skeleton skeleton-row" style="width:70%"></div></div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span id="last-updated">Loading…</span>
+    &nbsp;·&nbsp;
+    <a href="https://alerce.online" target="_blank" rel="noopener">alerce.online</a>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

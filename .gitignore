@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local env
+.env
+.env.*
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Prober runtime output (regenerated every minute in prod; written by dev_server.py locally)
+data/
