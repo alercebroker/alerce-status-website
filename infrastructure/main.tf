@@ -11,12 +11,12 @@ terraform {
     }
   }
 
-  # Uncomment and configure for remote state:
-  # backend "s3" {
-  #   bucket = "alerce-terraform-state"
-  #   key    = "status-website/terraform.tfstate"
-  #   region = "us-east-1"
-  # }
+  backend "s3" {
+    bucket  = "alerce-terraform-state"
+    key     = "status-website/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+  }
 }
 
 provider "aws" {
