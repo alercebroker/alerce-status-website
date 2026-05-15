@@ -38,7 +38,7 @@ Edit [lambda/config.json](lambda/config.json). Each component needs `id` (stable
 
 ## Posting an incident
 
-Edit [incidents/incidents.json](incidents/incidents.json), open PR, merge. Format documented in `README.md`. The deploy workflow uploads it to the data bucket; no Lambda involvement.
+Use [scripts/incident.py](scripts/incident.py) (`open` / `update` subcommands) to edit [incidents/incidents.json](incidents/incidents.json), then PR + merge. The script handles UTC timestamps, validates status against the incident vs. maintenance vocabularies, and auto-fills `resolved_at` on terminal status. Format documented in `README.md`. The deploy workflow uploads it to the data bucket; no Lambda involvement.
 
 ## Tests
 

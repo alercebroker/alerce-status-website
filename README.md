@@ -69,11 +69,35 @@ Both incidents and maintenance windows live in [incidents/incidents.json](incide
 
 ### Workflow
 
-1. Edit [incidents/incidents.json](incidents/incidents.json) — it's a JSON array; append a new object (or update an existing one to add an update or mark it terminal).
+1. Edit [incidents/incidents.json](incidents/incidents.json) using [scripts/incident.py](scripts/incident.py) (or by hand — it's a plain JSON array).
 2. Open a PR, get it reviewed, merge to `main`.
 3. The **Deploy** workflow uploads it to the data bucket. The live page polls `incidents.json` every 60 s, so it appears within ~1 minute of deploy.
 
-To test locally before opening the PR, run `python scripts/dev_server.py` and load `http://localhost:8000` — the dev server copies `incidents/incidents.json` into `data/` on startup.
+The helper script handles UTC timestamps, status validation, and auto-fills `resolved_at` on close:
+
+```bash
+# Open a new incident
+python scripts/incident.py open 2026-05-15-api-degraded \
+    --title "Elevated error rate on object API" \
+    --components apis --severity major \
+    --message "Investigating reports of API errors."
+
+# Append an update during the incident
+python scripts/incident.py update 2026-05-15-api-degraded \
+    --message "Rolled back the bad deploy; monitoring."
+
+# Close it
+python scripts/incident.py update 2026-05-15-api-degraded \
+    --status resolved --message "Resolved after rolling restart."
+
+# Schedule a maintenance window
+python scripts/incident.py open 2026-06-01-db-upgrade \
+    --type maintenance --title "Database upgrade" \
+    --start 2026-06-01T03:00:00Z --components apis \
+    --message "Maintenance window scheduled for Jun 1, 03:00–04:00 UTC."
+```
+
+To preview locally before opening the PR, run `python scripts/dev_server.py` and load `http://localhost:8000` — the dev server copies `incidents/incidents.json` into `data/` on startup.
 
 ### Incident entry
 
