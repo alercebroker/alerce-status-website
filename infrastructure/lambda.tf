@@ -8,7 +8,8 @@ data "archive_file" "prober" {
 
 # IAM role for the Lambda
 resource "aws_iam_role" "prober" {
-  name = "${local.name_prefix}-prober"
+  name                 = "${local.name_prefix}-prober"
+  permissions_boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/alerce-status-boundary"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

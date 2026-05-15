@@ -30,3 +30,6 @@ venv/
 
 # Prober runtime output (regenerated every minute in prod; written by dev_server.py locally)
 data/
+
+# Lambda build artifact — never committed to this public repo
+lambda.zip

@@ -16,7 +16,7 @@ EventBridge (1 min) → Lambda prober → S3 (data bucket) ← CloudFront ← us
 - [lambda/prober.py](lambda/prober.py) — HTTP-probes every endpoint in [lambda/config.json](lambda/config.json), writes `status.json` + `history.json` to S3. Standard library only at runtime (plus `boto3`, which is in the Lambda runtime).
 - [frontend/](frontend/) — plain HTML/CSS/JS. No build step, no framework.
 - [incidents/incidents.json](incidents/incidents.json) — edited by PR; CI uploads it to S3 on merge to `main`. The `data/` copy is a local-dev artifact written by [scripts/dev_server.py](scripts/dev_server.py).
-- [infrastructure/](infrastructure/) — Terraform; applied manually via the `Terraform` GitHub workflow.
+- [infrastructure/](infrastructure/) — Terraform; applied **locally** by admins with an SSO session via [scripts/tf-apply.sh](scripts/tf-apply.sh) (not from CI). See `README.md`. State is in `s3://alerce-terraform-state/`, locked via DynamoDB.
 
 Stage 2 (pipeline + Prometheus signals from on-prem) is **deferred and not yet designed** — don't preemptively add hooks, abstractions, or config for it.
 
