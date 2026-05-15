@@ -1,0 +1,132 @@
+[
+  {
+    "id": "2026-05-20-db-migration",
+    "type": "maintenance",
+    "title": "Scheduled database migration \u2014 Object APIs briefly unavailable",
+    "status": "scheduled",
+    "started_at": "2026-05-20T05:00:00Z",
+    "components": [
+      "apis"
+    ],
+    "updates": [
+      {
+        "at": "2026-05-13T15:00:00Z",
+        "message": "Maintenance scheduled for May 20, 05:00\u201305:30 UTC. Object metadata APIs will return 503 during the window."
+      }
+    ]
+  },
+  {
+    "id": "2026-05-15-lsst-probability-outage",
+    "title": "Multi-survey Probability API returning 503",
+    "status": "investigating",
+    "severity": "major",
+    "started_at": "2026-05-15T18:42:00Z",
+    "components": [
+      "apis"
+    ],
+    "updates": [
+      {
+        "at": "2026-05-15T18:50:00Z",
+        "message": "Investigating elevated 5xx responses from the multi-survey probability service. Other APIs are unaffected."
+      },
+      {
+        "at": "2026-05-15T19:05:00Z",
+        "message": "Backend pods are failing readiness checks after a model artifact rollout. Rolling back."
+      }
+    ]
+  },
+  {
+    "id": "2026-05-15-stamps-degraded",
+    "title": "Elevated latency on ZTF Stamps service",
+    "status": "monitoring",
+    "severity": "minor",
+    "started_at": "2026-05-15T17:30:00Z",
+    "components": [
+      "apis"
+    ],
+    "updates": [
+      {
+        "at": "2026-05-15T17:35:00Z",
+        "message": "Stamp retrieval latency above the 3 s degraded threshold. Investigating S3 throttling."
+      },
+      {
+        "at": "2026-05-15T18:20:00Z",
+        "message": "Identified contention on the upstream image archive. Increased connection pool; latency improving but still above target."
+      }
+    ]
+  },
+  {
+    "id": "2026-05-14-ztf-lightcurve-errors",
+    "title": "ZTF Lightcurve API intermittent 500s",
+    "status": "resolved",
+    "severity": "major",
+    "started_at": "2026-05-14T10:12:00Z",
+    "resolved_at": "2026-05-14T11:45:00Z",
+    "components": [
+      "apis"
+    ],
+    "updates": [
+      {
+        "at": "2026-05-14T10:15:00Z",
+        "message": "Investigating elevated 500 responses on the lightcurve endpoint."
+      },
+      {
+        "at": "2026-05-14T10:50:00Z",
+        "message": "Root cause identified: connection pool exhaustion against the lightcurve DB after a query plan regression."
+      },
+      {
+        "at": "2026-05-14T11:45:00Z",
+        "message": "Resolved. Query plan reverted and connections recycled. Monitoring."
+      }
+    ]
+  },
+  {
+    "id": "2026-04-30-crossmatch-outage",
+    "title": "Crossmatch and ZTF Stamps unavailable",
+    "status": "resolved",
+    "severity": "major",
+    "started_at": "2026-04-30T08:05:00Z",
+    "resolved_at": "2026-04-30T09:30:00Z",
+    "components": [
+      "apis"
+    ],
+    "updates": [
+      {
+        "at": "2026-04-30T08:10:00Z",
+        "message": "Both services returning connection timeouts. Investigating shared NAT gateway."
+      },
+      {
+        "at": "2026-04-30T08:40:00Z",
+        "message": "Confirmed NAT gateway saturation in the affected AZ. Failing traffic to secondary AZ."
+      },
+      {
+        "at": "2026-04-30T09:30:00Z",
+        "message": "Service restored after failover. Postmortem to follow."
+      }
+    ]
+  },
+  {
+    "id": "2026-04-10-db-upgrade",
+    "type": "maintenance",
+    "title": "PostgreSQL minor-version upgrade",
+    "status": "completed",
+    "started_at": "2026-04-10T03:00:00Z",
+    "components": [
+      "apis"
+    ],
+    "updates": [
+      {
+        "at": "2026-04-05T12:00:00Z",
+        "message": "Maintenance window scheduled for April 10, 03:00\u201304:00 UTC."
+      },
+      {
+        "at": "2026-04-10T03:05:00Z",
+        "message": "Upgrade in progress."
+      },
+      {
+        "at": "2026-04-10T03:38:00Z",
+        "message": "Completed successfully. APIs back online."
+      }
+    ]
+  }
+]
