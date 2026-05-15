@@ -29,22 +29,37 @@ pytest lambda/tests/ -v
 
 ## Deployment
 
-### First deploy
+### Code changes (Lambda or frontend)
 
-1. Set up GitHub Actions secrets:
-   - `AWS_DEPLOY_ROLE_ARN` — IAM role with OIDC trust for this repo
-   - `ROUTE53_ZONE_ID` — hosted zone for `alerce.online`
-   - After first Terraform apply, also add: `LAMBDA_FUNCTION_NAME`, `SITE_BUCKET`, `DATA_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`
+Push to `main` (via PR — `main` is protected, 1 approving review + `test` check required). The **Deploy** workflow tests, then deploys after a required reviewer approves in the `production` environment. The auto-deploy role (`alerce-status-website-github-deploy-v2`) is scoped to specific resource ARNs and carries a permissions boundary — it cannot touch IAM or create resources.
 
-2. Run Terraform (manual via GitHub Actions → **Terraform** workflow → action: `plan` then `apply`).
+### Infrastructure changes (Terraform)
 
-3. Merge to `main` — the **Deploy** workflow tests, packages the Lambda, syncs frontend, and uploads incidents.
+Terraform is **applied locally by admins**, not from CI. This removes the CI's standing IAM privilege.
 
-### Ongoing
+1. `aws sso login --profile default`
+2. `cd infrastructure && terraform init`
+3. Edit `.tf`, run `terraform plan -var "route53_zone_id=Z..." -var "environment=production"`.
+4. Open a PR, paste the plan output, get a review, merge.
+5. From a clean checkout of `main`:
+   ```bash
+   ./scripts/tf-apply.sh -var "route53_zone_id=Z..." -var "environment=production"
+   ```
+6. Announce in #devops Slack.
 
-- **Code changes** (Lambda or frontend): push to `main` → deploys automatically.
-- **Infrastructure changes**: run the Terraform workflow manually with `action=apply`.
-- **Posting an incident or maintenance note**: see [below](#posting-an-incident-or-maintenance-note).
+State is in `s3://alerce-terraform-state/status-website/terraform.tfstate`, locked via the `alerce-terraform-state-lock` DynamoDB table.
+
+**Never run `terraform apply` outside `scripts/tf-apply.sh`** — the wrapper refuses to apply from a feature branch or a dirty working tree.
+
+### First-time setup (one-off, for reference)
+
+GitHub Actions secrets required by the **Deploy** workflow:
+- `AWS_AUTO_DEPLOY_ROLE_ARN` — narrow auto-deploy role (created by Terraform / out-of-band)
+- `LAMBDA_FUNCTION_NAME`, `SITE_BUCKET`, `DATA_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID` — populated after the first `terraform apply`.
+
+### Posting an incident or maintenance note
+
+See [below](#posting-an-incident-or-maintenance-note).
 
 ## Configuring probed endpoints
 
