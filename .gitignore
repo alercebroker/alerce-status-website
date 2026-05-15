@@ -25,5 +25,8 @@ venv/
 # Claude Code local settings
 .claude/settings.local.json
 
+# Local-only notes (security plans, etc.) — never committed
+*.local.md
+
 # Prober runtime output (regenerated every minute in prod; written by dev_server.py locally)
 data/
