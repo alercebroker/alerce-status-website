@@ -203,9 +203,26 @@ footer {
 .incident-badge.identified    { background: #fee2e2; color: #991b1b; }
 .incident-badge.monitoring    { background: #e0f2fe; color: #075985; }
 .incident-badge.resolved      { background: #f0fdf4; color: #15803d; }
+.incident-badge.scheduled     { background: #ede9fe; color: #5b21b6; }
+.incident-badge.in_progress   { background: #ddd6fe; color: #4c1d95; }
+.incident-badge.completed     { background: #f0fdf4; color: #15803d; }
 .incident-date { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
 .incident-update { font-size: 13px; color: var(--text-muted); padding: 4px 0; }
 .incident-update time { font-weight: 500; color: var(--text); }
+.incident.maintenance { border-left: 3px solid #7c3aed; padding-left: 17px; }
+.incident-type.maintenance {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5b21b6;
+  background: #ede9fe;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-right: 8px;
+  vertical-align: 1px;
+}
 
 /* ── Stale warning ── */
 .stale-warning {

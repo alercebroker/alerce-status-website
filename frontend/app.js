@@ -130,6 +130,8 @@ function uptimePct(componentId) {
   return (ok / known.length * 100).toFixed(1) + "%";
 }
 
+const TERMINAL_STATUSES = new Set(["resolved", "completed"]);
+
 function renderIncidents() {
   const container = document.getElementById("incidents-list");
   if (!container) return;
@@ -137,11 +139,11 @@ function renderIncidents() {
   const thirtyDays = 30 * 24 * 60 * 60 * 1000;
 
   const visible = incidents
-    .filter(i => i.status !== "resolved" || (now - new Date(i.started_at).getTime()) < thirtyDays)
+    .filter(i => !TERMINAL_STATUSES.has(i.status) || (now - new Date(i.started_at).getTime()) < thirtyDays)
     .sort((a, b) => {
       // Active first, then newest
-      const aActive = a.status !== "resolved" ? 1 : 0;
-      const bActive = b.status !== "resolved" ? 1 : 0;
+      const aActive = TERMINAL_STATUSES.has(a.status) ? 0 : 1;
+      const bActive = TERMINAL_STATUSES.has(b.status) ? 0 : 1;
       if (aActive !== bActive) return bActive - aActive;
       return new Date(b.started_at) - new Date(a.started_at);
     });
@@ -152,15 +154,17 @@ function renderIncidents() {
   }
 
   container.innerHTML = visible.map(i => {
+    const isMaint = i.type === "maintenance";
     const date = fmtDate(i.started_at);
     const updates = (i.updates || []).slice().reverse().map(u =>
       `<div class="incident-update"><time>${esc(fmtDate(u.at))}</time> — ${esc(u.message)}</div>`
     ).join("");
+    const typeTag = isMaint ? `<span class="incident-type maintenance">Maintenance</span>` : "";
     return `
-      <div class="incident">
+      <div class="incident${isMaint ? " maintenance" : ""}">
         <div class="incident-header">
-          <span class="incident-title">${esc(i.title)}</span>
-          <span class="incident-badge ${esc(i.status)}">${esc(i.status)}</span>
+          <span class="incident-title">${typeTag}${esc(i.title)}</span>
+          <span class="incident-badge ${esc(i.status)}">${esc(i.status.replace(/_/g, " "))}</span>
         </div>
         <div class="incident-date">${esc(date)}</div>
         ${updates}

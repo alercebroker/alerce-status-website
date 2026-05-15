@@ -44,7 +44,7 @@ pytest lambda/tests/ -v
 
 - **Code changes** (Lambda or frontend): push to `main` → deploys automatically.
 - **Infrastructure changes**: run the Terraform workflow manually with `action=apply`.
-- **Posting an incident**: edit `incidents/incidents.json`, open a PR, merge.
+- **Posting an incident or maintenance note**: see [below](#posting-an-incident-or-maintenance-note).
 
 ## Configuring probed endpoints
 
@@ -63,20 +63,69 @@ Thresholds (`thresholds` key):
 - `latency_degraded_ms` — response slower than this → degraded (default 2000 ms)
 - `latency_outage_ms` — response slower than this → outage (default 10000 ms)
 
-## Incident format
+## Posting an incident or maintenance note
+
+Both incidents and maintenance windows live in [incidents/incidents.json](incidents/incidents.json). They're distinguished by the optional `type` field: omit it (or set `"incident"`) for an unplanned incident; set `"maintenance"` for a planned window. The frontend renders both under the **Incidents & Maintenance** card; maintenance entries get a purple accent and a "Maintenance" tag.
+
+### Workflow
+
+1. Edit [incidents/incidents.json](incidents/incidents.json) — it's a JSON array; append a new object (or update an existing one to add an update or mark it terminal).
+2. Open a PR, get it reviewed, merge to `main`.
+3. The **Deploy** workflow uploads it to the data bucket. The live page polls `incidents.json` every 60 s, so it appears within ~1 minute of deploy.
+
+To test locally before opening the PR, run `python scripts/dev_server.py` and load `http://localhost:8000` — the dev server copies `incidents/incidents.json` into `data/` on startup.
+
+### Incident entry
 
 ```json
 {
-  "id": "YYYY-MM-DD-short-slug",
-  "title": "Human-readable title",
-  "status": "investigating | identified | monitoring | resolved",
-  "severity": "minor | major | critical",
+  "id": "2026-01-01-api-degraded",
+  "title": "Elevated error rate on object API",
+  "status": "investigating",
+  "severity": "major",
   "started_at": "2026-01-01T12:00:00Z",
   "resolved_at": "2026-01-01T14:00:00Z",
-  "components": ["apis", "frontends"],
+  "components": ["apis"],
   "updates": [
     {"at": "2026-01-01T12:05:00Z", "message": "Investigating reports of API errors."},
     {"at": "2026-01-01T14:00:00Z", "message": "Resolved after rolling restart."}
   ]
 }
 ```
+
+### Scheduled maintenance entry
+
+```json
+{
+  "id": "2026-02-10-db-upgrade",
+  "type": "maintenance",
+  "title": "Database upgrade — object API briefly unavailable",
+  "status": "scheduled",
+  "started_at": "2026-02-10T03:00:00Z",
+  "components": ["apis"],
+  "updates": [
+    {"at": "2026-02-05T12:00:00Z", "message": "Maintenance window scheduled for Feb 10, 03:00–04:00 UTC."}
+  ]
+}
+```
+
+Bump `status` to `in_progress` when the window starts and `completed` when it ends.
+
+### Fields
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | yes | Stable slug, conventionally `YYYY-MM-DD-short-slug`. |
+| `type` | optional | `"incident"` (default) or `"maintenance"`. Drives the visual distinction. |
+| `title` | yes | Shown as the headline. |
+| `status` | yes | Incidents: `investigating`, `identified`, `monitoring`, `resolved`. Maintenance: `scheduled`, `in_progress`, `completed`. Drives the badge color. |
+| `severity` | optional | `minor`, `major`, or `critical`. Informational only. |
+| `started_at` | yes | ISO 8601 UTC (`Z` suffix). Drives sort order and the 30-day visibility window. For scheduled maintenance, set to the planned start (future timestamps are fine). |
+| `resolved_at` | when terminal | ISO 8601 UTC. Set when the entry reaches its terminal status. |
+| `components` | optional | Free-form list, typically `apis` and/or `frontends`. |
+| `updates` | optional | Append-only log; each item needs `at` (ISO 8601 UTC) and `message`. |
+
+### Visibility rules
+
+- Active entries (status is not `resolved` or `completed`) are always shown, sorted before terminal ones.
+- Terminal entries are hidden once `started_at` is older than 30 days.
