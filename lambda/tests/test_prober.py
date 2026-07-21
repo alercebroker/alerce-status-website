@@ -1,5 +1,6 @@
 """Unit tests for prober.py — run with: pytest lambda/tests/"""
 
+import gzip
 import json
 import sys
 import os
@@ -179,6 +180,7 @@ class _FakeS3:
     def __init__(self, existing=None):
         self._data = existing
         self.written = None
+        self.put_kwargs = None
 
     class exceptions:
         class NoSuchKey(Exception):
@@ -190,7 +192,11 @@ class _FakeS3:
         return {"Body": _FakeBody(json.dumps(self._data).encode())}
 
     def put_object(self, **kw):
-        self.written = json.loads(kw["Body"])
+        self.put_kwargs = kw
+        body = kw["Body"]
+        if kw.get("ContentEncoding") == "gzip":
+            body = gzip.decompress(body)
+        self.written = json.loads(body)
 
 
 class _FakeBody:
@@ -242,3 +248,31 @@ def test_history_no_raw_numerics():
     history_str = json.dumps(s3.written)
     for forbidden in ["200", "404", "500", "1000", "2000"]:
         assert forbidden not in history_str
+
+
+def test_history_stored_gzipped_with_cache_ttl():
+    """history.json is written gzipped with Content-Encoding and a 60 s TTL."""
+    s3 = _FakeS3()
+    snap = _snapshot_with({"api-object": "operational"})
+    prober.update_history(s3, snap)
+    assert s3.put_kwargs["ContentEncoding"] == "gzip"
+    assert s3.put_kwargs["CacheControl"] == "max-age=60"
+    assert s3.put_kwargs["Body"][:2] == b"\x1f\x8b"  # gzip magic number
+
+
+def test_history_round_trips_gzipped_object():
+    """A previously-gzipped history.json must be decompressed on read-back,
+    not treated as corrupt (which would silently wipe accumulated history)."""
+    s3 = _FakeS3()
+    snap = _snapshot_with({"api-object": "operational"})
+    prober.update_history(s3, snap)
+    stored = s3.put_kwargs["Body"]  # gzipped bytes now "in S3"
+
+    class _GzS3(_FakeS3):
+        def get_object(self, **kw):
+            return {"Body": _FakeBody(stored)}
+
+    s3b = _GzS3()
+    prober.update_history(s3b, snap)
+    assert "api-object" in s3b.written
+    assert len(s3b.written["api-object"]) == 1

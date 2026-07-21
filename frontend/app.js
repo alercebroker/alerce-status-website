@@ -12,8 +12,11 @@ let incidents = [];
 
 // ── Fetch helpers ────────────────────────────────────────────────────────────
 
-async function fetchJSON(path) {
-  const res = await fetch(path + "?_=" + Date.now());
+async function fetchJSON(path, { bustCache = true } = {}) {
+  // status/incidents bust the cache for freshness; history is cacheable
+  // (served with Cache-Control: max-age=60) so we let the browser/CDN reuse it.
+  const url = bustCache ? path + "?_=" + Date.now() : path;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -208,7 +211,7 @@ async function refreshStatus() {
 
 async function refreshHistory() {
   try {
-    history = await fetchJSON(DATA_BASE + "/history.json");
+    history = await fetchJSON(DATA_BASE + "/history.json", { bustCache: false });
   } catch (e) {
     console.error("Failed to fetch history.json", e);
   }

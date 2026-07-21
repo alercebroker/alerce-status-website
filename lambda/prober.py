@@ -6,6 +6,7 @@ Non-operational components include probe_url, http_code, and response_ms
 for diagnostic display. Operational components omit these fields.
 """
 
+import gzip
 import json
 import os
 import time
@@ -123,7 +124,7 @@ def build_snapshot(probe_results, config):
 def update_history(s3, snapshot):
     """
     Read existing history.json, append a bucket for this run,
-    prune to 90 days, write back.
+    prune to 90 days, write back (gzipped, with a 60 s cache TTL).
 
     History format:
     {
@@ -135,7 +136,10 @@ def update_history(s3, snapshot):
     """
     try:
         obj = s3.get_object(Bucket=BUCKET, Key="data/history.json")
-        history = json.loads(obj["Body"].read())
+        raw = obj["Body"].read()
+        if raw[:2] == b"\x1f\x8b":  # gzip magic number — object is stored gzipped
+            raw = gzip.decompress(raw)
+        history = json.loads(raw)
     except s3.exceptions.NoSuchKey:
         history = {}
     except Exception:
@@ -161,12 +165,18 @@ def update_history(s3, snapshot):
         buckets = [b for b in buckets if b["ts"] >= cutoff]
         history[cid] = sorted(buckets, key=lambda b: b["ts"])
 
+    # Store gzipped: this payload is highly repetitive (~5% of raw size) and
+    # exceeds CloudFront's 10 MB auto-compression limit, so we compress at the
+    # origin. Browsers decompress transparently via Content-Encoding. The read
+    # above detects the gzip magic number, so re-runs round-trip correctly.
+    body = json.dumps(history, separators=(",", ":")).encode("utf-8")
     s3.put_object(
         Bucket=BUCKET,
         Key="data/history.json",
-        Body=json.dumps(history, separators=(",", ":")),
+        Body=gzip.compress(body, mtime=0),
         ContentType="application/json",
-        CacheControl="no-cache",
+        ContentEncoding="gzip",
+        CacheControl="max-age=60",
     )
 
 
