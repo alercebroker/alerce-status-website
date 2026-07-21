@@ -1,0 +1,8 @@
+# Code owners for alerce-status-website.
+#
+# Branch protection ("Require review from Code Owners") makes every pull
+# request to a protected branch require an approving review from one of the
+# repo admins listed below. Repo admins bypass branch protection
+# (enforce_admins = false), so they can still merge their own PRs without a
+# review; non-admin writers need one of these admins to approve.
+*       @fforster @guille-c @ignacioreyes
