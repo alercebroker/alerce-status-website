@@ -10,6 +10,7 @@ Usage:
   DEMO=1 python dev_server.py    # serve demo/*.json, skip the live prober
 """
 
+import gzip
 import json
 import os
 import shutil
@@ -47,9 +48,15 @@ class _LocalS3:
 
     def put_object(self, **kw):
         body = kw["Body"]
+        if isinstance(body, str):
+            body = body.encode()
+        # The prober gzips history.json for S3/CloudFront; the local static
+        # server sends no Content-Encoding, so store it decompressed on disk.
+        if kw.get("ContentEncoding") == "gzip":
+            body = gzip.decompress(body)
         path = ROOT / kw["Key"]
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(body.encode() if isinstance(body, str) else body)
+        path.write_bytes(body)
 
 
 def run_prober():
