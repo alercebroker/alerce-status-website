@@ -66,7 +66,7 @@ function renderComponents(snapshot) {
     }
 
     const info = comp.description
-      ? `<span class="info" tabindex="0" title="${esc(comp.description)}" aria-label="${esc(comp.description)}">?</span>`
+      ? `<span class="info" tabindex="0" aria-label="${esc(comp.description)}" data-tip="${esc(comp.description)}">?</span>`
       : "";
 
     const row = document.createElement("div");
@@ -196,6 +196,42 @@ function updateLastUpdated(updatedAt) {
   el.textContent = `Last updated: ${label}`;
 }
 
+// ── Info tooltips ──────────────────────────────────────────────────────────────
+// The "?" descriptions live in a floating element on <body> rather than a CSS
+// tooltip inside the row, because `.card` uses overflow:hidden which would clip
+// an absolutely-positioned bubble. Positioned on hover/focus, clamped to the
+// viewport, and flipped below the icon when there's no room above.
+
+function setupTooltips() {
+  const tip = document.createElement("div");
+  tip.id = "tooltip";
+  tip.setAttribute("role", "tooltip");
+  document.body.appendChild(tip);
+
+  function show(el) {
+    const text = el.getAttribute("data-tip");
+    if (!text) return;
+    tip.textContent = text;                     // set content before measuring
+    const r = el.getBoundingClientRect();
+    const t = tip.getBoundingClientRect();
+    let left = r.left + r.width / 2 - t.width / 2;
+    left = Math.min(Math.max(8, left), window.innerWidth - t.width - 8);
+    let top = r.top - t.height - 8;
+    if (top < 8) top = r.bottom + 8;            // flip below if no room above
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+    tip.classList.add("show");
+  }
+  function hide() { tip.classList.remove("show"); }
+
+  // Delegated: component rows are re-rendered on every status refresh.
+  document.addEventListener("mouseover", e => { const el = e.target.closest?.(".info"); if (el) show(el); });
+  document.addEventListener("mouseout",  e => { if (e.target.closest?.(".info")) hide(); });
+  document.addEventListener("focusin",   e => { const el = e.target.closest?.(".info"); if (el) show(el); });
+  document.addEventListener("focusout",  e => { if (e.target.closest?.(".info")) hide(); });
+  window.addEventListener("scroll", hide, true);
+}
+
 // ── Poll loops ───────────────────────────────────────────────────────────────
 
 async function refreshStatus() {
@@ -247,6 +283,7 @@ function fmtDate(iso) {
 // ── Boot ────────────────────────────────────────────────────────────────────
 
 (async function init() {
+  setupTooltips();
   // Load history first so uptime bars render on first status paint
   await refreshHistory();
   await refreshStatus();
