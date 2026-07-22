@@ -352,3 +352,138 @@ def test_history_round_trips_gzipped_object():
     prober.update_history(s3b, snap)
     assert "api-object" in s3b.written
     assert len(s3b.written["api-object"]) == 1
+
+
+# --- state-change alerting ---
+
+def _c(cid, status, label=None, http_code=None, response_ms=None):
+    e = {"id": cid, "label": label or cid, "status": status}
+    if http_code is not None:
+        e["http_code"] = http_code
+    if response_ms is not None:
+        e["response_ms"] = response_ms
+    return e
+
+
+def _snap(*comps, overall="operational"):
+    return {"status": overall, "components": list(comps)}
+
+
+class _FakeSNS:
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.published = []
+
+    def publish(self, **kw):
+        if self.fail:
+            raise RuntimeError("sns unavailable")
+        self.published.append(kw)
+        return {"MessageId": "test"}
+
+
+def test_transitions_no_baseline_is_silent():
+    """First run (no prev status.json) must not alert on anything."""
+    snap = _snap(_c("a", "outage"), _c("b", "degraded"))
+    assert prober.compute_transitions(None, snap) == []
+
+
+def test_transition_operational_to_outage_is_down():
+    t = prober.compute_transitions({"a": "operational"},
+                                   _snap(_c("a", "outage", http_code=502, response_ms=120)))
+    assert len(t) == 1
+    assert t[0]["kind"] == "down"
+    assert t[0]["prev"] == "operational" and t[0]["new"] == "outage"
+    assert t[0]["http_code"] == 502 and t[0]["response_ms"] == 120
+
+
+def test_transition_operational_to_degraded_is_down():
+    t = prober.compute_transitions({"a": "operational"}, _snap(_c("a", "degraded")))
+    assert [x["kind"] for x in t] == ["down"]
+
+
+def test_transition_degraded_to_outage_escalates():
+    t = prober.compute_transitions({"a": "degraded"}, _snap(_c("a", "outage")))
+    assert [x["kind"] for x in t] == ["down"]
+
+
+def test_transition_partial_recovery_is_silent():
+    """outage → degraded stays 'in incident' — no re-page."""
+    assert prober.compute_transitions({"a": "outage"}, _snap(_c("a", "degraded"))) == []
+
+
+def test_transition_full_recovery_is_all_clear():
+    for prev in ("outage", "degraded"):
+        t = prober.compute_transitions({"a": prev}, _snap(_c("a", "operational")))
+        assert [x["kind"] for x in t] == ["recovered"]
+
+
+def test_transition_unchanged_is_silent():
+    assert prober.compute_transitions({"a": "outage"}, _snap(_c("a", "outage"))) == []
+
+
+def test_transition_new_component_sets_baseline_silently():
+    """A component absent from the previous snapshot is baselined, not alerted."""
+    assert prober.compute_transitions({"other": "operational"},
+                                      _snap(_c("new-comp", "outage"))) == []
+
+
+def test_format_alert_subject_is_ascii_and_bounded():
+    t = prober.compute_transitions({"a": "operational"}, _snap(_c("a", "outage", label="X")))
+    subject, _ = prober.format_alert(t, "outage")
+    assert subject.isascii()
+    assert len(subject) <= 100
+
+
+def test_format_alert_body_carries_diagnostics_and_link():
+    t = prober.compute_transitions(
+        {"a": "operational"},
+        _snap(_c("a", "outage", label="Object API", http_code=502, response_ms=340), overall="outage"))
+    subject, body = prober.format_alert(t, "outage")
+    assert "Object API" in subject
+    assert "Object API" in body
+    assert "operational → outage" in body
+    assert "HTTP 502" in body and "340 ms" in body
+    assert prober.STATUS_PAGE_URL in body
+
+
+def test_format_alert_recovery_message():
+    t = prober.compute_transitions({"a": "outage"}, _snap(_c("a", "operational", label="Object API")))
+    _, body = prober.format_alert(t, "operational")
+    assert "operational" in body and "Object API" in body
+
+
+def test_maybe_alert_publishes_once_on_transition():
+    sns = _FakeSNS()
+    fired = prober.maybe_alert(sns, "arn:topic", {"a": "operational"}, _snap(_c("a", "outage")))
+    assert len(fired) == 1
+    assert len(sns.published) == 1
+    assert sns.published[0]["TopicArn"] == "arn:topic"
+    assert "Subject" in sns.published[0] and "Message" in sns.published[0]
+
+
+def test_maybe_alert_no_publish_without_transitions():
+    sns = _FakeSNS()
+    assert prober.maybe_alert(sns, "arn:topic", {"a": "operational"}, _snap(_c("a", "operational"))) == []
+    assert sns.published == []
+
+
+def test_maybe_alert_disabled_when_topic_unset():
+    sns = _FakeSNS()
+    assert prober.maybe_alert(sns, "", {"a": "operational"}, _snap(_c("a", "outage"))) == []
+    assert sns.published == []
+
+
+def test_maybe_alert_swallows_publish_failure():
+    """An SNS failure must not propagate — the status write already succeeded."""
+    sns = _FakeSNS(fail=True)
+    assert prober.maybe_alert(sns, "arn:topic", {"a": "operational"}, _snap(_c("a", "outage"))) == []
+
+
+def test_read_prev_status_parses_components():
+    s3 = _FakeS3(existing={"components": [{"id": "a", "status": "outage"},
+                                          {"id": "b", "status": "operational"}]})
+    assert prober.read_prev_status(s3) == {"a": "outage", "b": "operational"}
+
+
+def test_read_prev_status_none_when_missing():
+    assert prober.read_prev_status(_FakeS3()) is None

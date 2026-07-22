@@ -39,6 +39,22 @@ resource "aws_iam_role_policy_attachment" "prober_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# Publish component state-change alerts. Scoped to the alerts topic only; also
+# gated by the alerce-status-boundary, which must allow sns:Publish on
+# alerce-status-* topics for this grant to be effective.
+resource "aws_iam_role_policy" "prober_sns" {
+  name = "sns-publish-alerts"
+  role = aws_iam_role.prober.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "sns:Publish"
+      Resource = aws_sns_topic.alerts.arn
+    }]
+  })
+}
+
 resource "aws_lambda_function" "prober" {
   function_name    = "${local.name_prefix}-prober"
   role             = aws_iam_role.prober.arn
@@ -54,7 +70,8 @@ resource "aws_lambda_function" "prober" {
 
   environment {
     variables = {
-      STATUS_BUCKET = aws_s3_bucket.data.bucket
+      STATUS_BUCKET   = aws_s3_bucket.data.bucket
+      ALERT_TOPIC_ARN = aws_sns_topic.alerts.arn
     }
   }
 }
@@ -85,7 +102,9 @@ resource "aws_lambda_permission" "eventbridge" {
   source_arn    = aws_cloudwatch_event_rule.prober.arn
 }
 
-# Alarm: prober hasn't succeeded in 10 minutes
+# Alarm: prober hasn't fired in 10 minutes. When the Lambda stops being invoked
+# the Invocations metric goes MISSING (not < 1), so treat_missing_data = breaching
+# is what actually makes this trip; without it the alarm never fires.
 resource "aws_cloudwatch_metric_alarm" "prober_dead" {
   alarm_name          = "${local.name_prefix}-prober-dead"
   comparison_operator = "LessThanThreshold"
@@ -95,11 +114,37 @@ resource "aws_cloudwatch_metric_alarm" "prober_dead" {
   period              = 600  # 10 minutes
   statistic           = "Sum"
   threshold           = 1
+  treat_missing_data  = "breaching"
   alarm_description   = "Status prober Lambda has not fired in 10 minutes"
 
   dimensions = {
     FunctionName = aws_lambda_function.prober.function_name
   }
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+# Alarm: prober invoked but raised an error (its own job failed).
+# prober_dead can't catch this — an erroring run still counts an Invocation.
+resource "aws_cloudwatch_metric_alarm" "prober_errors" {
+  alarm_name          = "${local.name_prefix}-prober-errors"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Status prober Lambda returned an error on its last run"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.prober.function_name
+  }
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
 output "lambda_function_name" { value = aws_lambda_function.prober.function_name }

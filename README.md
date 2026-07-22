@@ -12,6 +12,34 @@ Raw metrics (latency, HTTP codes) are never exposed in the output JSON — only 
 
 Stage 2 (pipeline + Prometheus signals from on-prem) is not yet designed.
 
+## Alerting
+
+Notifications go to Slack via an SNS topic (`alerce-status-<env>-alerts`) with an
+email subscription to a Slack channel's email-integration address — the same
+CloudWatch → email → Slack path used elsewhere at ALeRCE.
+
+Three sources publish to that topic:
+
+- **Component state changes** — on each run the prober diffs the new snapshot
+  against the previously published `status.json` and, when something changed,
+  publishes **one aggregated** message. It alerts when a component gets *worse*
+  (operational → degraded/outage, including degraded → outage escalation) and
+  when it *fully recovers* (back to operational). Partial recovery
+  (outage → degraded) does not re-page, and the first run after a deploy sets a
+  baseline silently. The message carries the HTTP code / latency for down
+  components — these stay **private to the alert**, never added to the public
+  `status.json`. Alerting is best-effort: a notification failure never blocks the
+  status/history writes.
+- **`alerce-status-<env>-prober-dead`** — the prober Lambda hasn't fired in 10 min.
+- **`alerce-status-<env>-prober-errors`** — the prober Lambda raised an error.
+
+**One-time setup:** the prober's `sns:Publish` requires the `alerce-status-boundary`
+permissions boundary to allow `sns:Publish` on `alerce-status-*` topics (applied
+out-of-band). And SNS email subscriptions can't be auto-confirmed by Terraform —
+after the first apply, open the confirmation email that lands in the Slack channel
+and click **Confirm subscription**. Until then, publishes succeed but nothing is
+delivered.
+
 ## Local development
 
 ```bash
@@ -39,13 +67,15 @@ Terraform is **applied locally by admins**, not from CI. This removes the CI's s
 
 1. `aws sso login --profile default`
 2. `cd infrastructure && terraform init`
-3. Edit `.tf`, run `terraform plan -var "route53_zone_id=Z..." -var "environment=production"`.
+3. Edit `.tf`, run `terraform plan -var "route53_zone_id=Z..." -var "environment=production" -var "alert_email=..."`.
 4. Open a PR, paste the plan output, get a review, merge.
 5. From a clean checkout of `main`:
    ```bash
-   ./scripts/tf-apply.sh -var "route53_zone_id=Z..." -var "environment=production"
+   ./scripts/tf-apply.sh -var "route53_zone_id=Z..." -var "environment=production" -var "alert_email=..."
    ```
 6. Announce in #devops Slack.
+
+`alert_email` is the endpoint for the alerts SNS topic — typically a Slack channel's email-integration address (matching the existing ALeRCE CloudWatch → email → Slack pattern). It's a `sensitive`, no-default variable, so it's supplied at apply time and never committed. See [Alerting](#alerting) for the one-time subscription-confirmation step.
 
 State is in `s3://alerce-terraform-state/status-website/terraform.tfstate`, locked via the `alerce-terraform-state-lock` DynamoDB table.
 

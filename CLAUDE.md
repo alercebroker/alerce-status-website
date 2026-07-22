@@ -8,12 +8,13 @@ See `README.md` for user-facing setup, local dev, and deployment instructions. T
 
 ```
 EventBridge (5 min) → Lambda prober → S3 (data bucket) ← CloudFront ← user
-                                       ↑
-                              GitHub Actions on push to main
-                              (frontend sync + incidents.json)
+                            │          ↑
+                            │   GitHub Actions on push to main
+                            │   (frontend sync + incidents.json)
+                            └→ SNS (alerts topic) → email → Slack
 ```
 
-- [lambda/prober.py](lambda/prober.py) — HTTP-probes every endpoint in [lambda/config.json](lambda/config.json), writes `status.json` + `history.json` to S3. Standard library only at runtime (plus `boto3`, which is in the Lambda runtime).
+- [lambda/prober.py](lambda/prober.py) — HTTP-probes every endpoint in [lambda/config.json](lambda/config.json), writes `status.json` + `history.json` to S3, and publishes state-change alerts to SNS (see **Alerting**). Standard library only at runtime (plus `boto3`, which is in the Lambda runtime).
 - [frontend/](frontend/) — plain HTML/CSS/JS. No build step, no framework.
 - [incidents/incidents.json](incidents/incidents.json) — edited by PR; CI uploads it to S3 on merge to `main`. The `data/` copy is a local-dev artifact written by [scripts/dev_server.py](scripts/dev_server.py).
 - [infrastructure/](infrastructure/) — Terraform; applied **locally** by admins with an SSO session via [scripts/tf-apply.sh](scripts/tf-apply.sh) (not from CI). See `README.md`. State is in `s3://alerce-terraform-state/`, locked via DynamoDB.
@@ -24,7 +25,9 @@ Stage 2 (pipeline + Prometheus signals from on-prem) is **deferred and not yet d
 
 **No frameworks, no dependencies.** Python stdlib for the prober/dev server, plain HTML/CSS/JS for the frontend. Don't add Flask, React, requests, etc. `boto3` is the only allowed runtime import beyond stdlib (it's preinstalled in the Lambda runtime).
 
-**No raw metrics in the output JSON for operational components.** `status.json` carries the `operational | degraded | outage` label plus `probe_url` (the endpoint being checked — public info, surfaced in the UI's per-row expander) for **every** component. `http_code` and `response_ms` are included **only** when a component is non-operational, for diagnostic display. Don't add latency series, percentiles, or per-probe metrics to the public payload for healthy components. Raw `response_ms` for **every** probe (operational included) is instead logged **privately** to the Lambda's CloudWatch Logs — one JSON line per probe, `metric=probe_latency` (see `log_response_times()`) — for threshold tuning via Logs Insights. Keep latency in the logs, never in the public payload.
+**No raw metrics in the output JSON for operational components.** `status.json` carries the `operational | degraded | outage` label plus `probe_url` (the endpoint being checked — public info, surfaced in the UI's per-row expander) for **every** component. `http_code` and `response_ms` are included **only** when a component is non-operational, for diagnostic display. Don't add latency series, percentiles, or per-probe metrics to the public payload for healthy components. Raw `response_ms` for **every** probe (operational included) is instead logged **privately** to the Lambda's CloudWatch Logs — one JSON line per probe, `metric=probe_latency` (see `log_response_times()`) — for threshold tuning via Logs Insights. `http_code`/`response_ms` for non-operational components also ride the **private SNS alert** message (see **Alerting**). Keep metrics in the logs and alerts, never in the public payload for healthy components.
+
+**Alerting is edge-triggered and best-effort.** On each run the prober reads the previously published `status.json` (before overwriting it) and diffs statuses in `compute_transitions()`: it alerts when a component gets *worse* (severity rank increases above operational, incl. degraded→outage) and when it *fully recovers* to operational — partial recovery (outage→degraded) is intentionally silent, and a missing baseline (first run / newly-added component) sets state without alerting. All of a run's transitions are aggregated into **one** SNS message (`format_alert()` — ASCII subject, since SNS rejects non-ASCII subjects). `maybe_alert()` never raises: a notification failure must not block the `status.json`/`history.json` writes. Alerting is disabled (silently skipped) when `ALERT_TOPIC_ARN` is unset, so the local dry-run and dev server don't publish. The two Lambda self-health alarms (`prober-dead`, `prober-errors`) route to the same topic; `prober-dead` relies on `treat_missing_data = "breaching"` because a stopped Lambda emits *no* `Invocations` datapoint.
 
 **HA was a deliberate choice over simplicity.** The Lambda + S3 + CloudFront design exists because the status page must stay up even when ALeRCE infra is down. Don't propose collapsing to a single EC2 / single-region setup.
 
@@ -58,7 +61,7 @@ There's no headless test for the frontend. For UI work, run `python scripts/dev_
 
 **The ALeRCE AWS account holds valuable data and has a large budget.** Treat any new AWS permission as a blast-radius decision, not a convenience. Specifically:
 
-- **Scope IAM policies to `alerce-status-*` resources.** All Terraform-created resources use `local.name_prefix = "alerce-status-${var.environment}"`. The deploy role's permissions must use that prefix so this project cannot touch other ALeRCE infrastructure.
+- **Scope IAM policies to `alerce-status-*` resources.** All Terraform-created resources use `local.name_prefix = "alerce-status-${var.environment}"`. The deploy role's permissions must use that prefix so this project cannot touch other ALeRCE infrastructure. The prober's `sns:Publish` grant is scoped to its own alerts topic ARN, and the out-of-band `alerce-status-boundary` permits `sns:Publish` **only** on `arn:aws:sns:*:<acct>:alerce-status-*` — keep both scoped if you touch alerting.
 - **No `*:*` permissions.** Don't grant `s3:*` on `*`, `iam:*` on `*`, or `PowerUserAccess` — even temporarily. If a Terraform resource needs a new permission, add the specific action scoped to the specific resource.
 - **OIDC trust must be scoped.** The GitHub OIDC role trusts only `repo:alercebroker/alerce-status-website` with `environment:production` or `environment:staging`. Don't widen this to `*` refs or other repos.
 - **Don't touch resources outside this project.** No edits to other ALeRCE buckets, Lambdas, IAM roles, or Route53 records (other than the validation/alias records this project owns under `alerce.online`). If a fix seems to require it, stop and ask.
