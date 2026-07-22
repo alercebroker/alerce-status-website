@@ -46,7 +46,10 @@ resource "aws_lambda_function" "prober" {
   runtime          = "python3.12"
   filename         = data.archive_file.prober.output_path
   source_code_hash = data.archive_file.prober.output_base64sha256
-  timeout          = 30
+  # Probes run sequentially and some endpoints are legitimately slow (all-catalog
+  # crossmatch ~20 s, object-ranking ~13 s), so a full run can take ~2-3 min.
+  # Well under the 5-min schedule, so invocations never overlap.
+  timeout          = 240
   memory_size      = 256
 
   environment {
@@ -57,8 +60,10 @@ resource "aws_lambda_function" "prober" {
 }
 
 resource "aws_cloudwatch_log_group" "prober" {
-  name              = "/aws/lambda/${aws_lambda_function.prober.function_name}"
-  retention_in_days = 14
+  name = "/aws/lambda/${aws_lambda_function.prober.function_name}"
+  # 30 days so per-probe response times (logged privately as JSON lines) can be
+  # queried in Logs Insights to calibrate per-endpoint latency thresholds.
+  retention_in_days = 30
 }
 
 # EventBridge schedule
