@@ -5,7 +5,13 @@ const POLL_STATUS_MS  = 30_000;
 const POLL_HISTORY_MS = 60_000;
 const POLL_INCIDENTS_MS = 60_000;
 const HISTORY_BUCKETS = 90 * 24 * 60 / 5; // 90 days of 5-min buckets (max)
-const DISPLAY_DAYS = 30; // each bar = one day, colored by the worst status seen that day
+const DISPLAY_DAYS = 30;       // each bar = one day
+const BUCKET_MINUTES = 5;      // must match the prober's history bucketing (one status sample per window)
+// Threshold coloring: a day is colored by the *fraction* of its samples in each
+// state, not by the single worst sample — so one transient failed check no longer
+// paints a whole day red. Exact per-day downtime/degraded time lives in the tooltip.
+const OK_GREEN_FRAC = 0.995;   // ≥99.5% operational stays green (absorbs a lone 5-min blip)
+const OUTAGE_RED_FRAC = 0.05;  // >5% of the day down (≈>1h) turns the bar red; less → yellow
 
 let history  = {};
 let incidents = [];
@@ -87,9 +93,10 @@ function renderComponents(snapshot) {
 }
 
 // Aggregate raw 5-min buckets into DISPLAY_DAYS daily slots, oldest first.
-// Each slot's status is the worst seen that UTC day; days with no data stay "unknown".
+// Each slot keeps the per-state sample counts for its UTC day so we can report
+// the *fraction* of the day spent operational/degraded/down (and derive a
+// threshold color) instead of collapsing the day to its single worst sample.
 function aggregateDaily(componentId) {
-  const rank = { unknown: 0, operational: 1, degraded: 2, outage: 3 };
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
@@ -97,7 +104,7 @@ function aggregateDaily(componentId) {
   for (let i = DISPLAY_DAYS - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
-    slots.push({ date: d.toISOString().slice(0, 10), status: "unknown" });
+    slots.push({ date: d.toISOString().slice(0, 10), operational: 0, degraded: 0, outage: 0 });
   }
   const indexByDate = Object.fromEntries(slots.map((s, i) => [s.date, i]));
 
@@ -105,18 +112,30 @@ function aggregateDaily(componentId) {
     const day = (b.ts || "").slice(0, 10);
     const idx = indexByDate[day];
     if (idx === undefined) continue;
-    const cur = slots[idx].status;
-    if ((rank[b.status] ?? 0) > rank[cur]) slots[idx].status = b.status;
+    if (b.status === "operational" || b.status === "degraded" || b.status === "outage") slots[idx][b.status] += 1;
   }
-  return slots;
+  return slots.map(dayStats);
+}
+
+// Derive fractions and the threshold bar color from a day's sample counts.
+function dayStats(s) {
+  const total = s.operational + s.degraded + s.outage;
+  if (total === 0) return { ...s, total: 0, status: "unknown" };
+  const outageFrac = s.outage / total;
+  const opFrac = s.operational / total;
+  let status;
+  if (outageFrac >= OUTAGE_RED_FRAC)   status = "outage";       // sustained downtime → red
+  else if (opFrac < OK_GREEN_FRAC)     status = "degraded";     // some degraded / minor outage → yellow
+  else                                 status = "operational";  // fully-up, or a single absorbed blip → green
+  // "Uptime" = time not fully down; degraded still counts as reachable-but-slow.
+  return { ...s, total, status, upFrac: 1 - outageFrac };
 }
 
 function buildUptimeBar(componentId) {
   const days = aggregateDaily(componentId);
   const bars = days.map(d => {
     const cls = d.status === "unknown" ? "" : statusClass(d.status);
-    const title = d.status === "unknown" ? `${d.date}: no data` : `${d.date}: ${d.status}`;
-    return `<div class="bucket ${cls}" title="${esc(title)}"></div>`;
+    return `<div class="bucket ${cls}" title="${esc(dayTooltip(d))}"></div>`;
   }).join("");
   const pct = uptimePct(componentId);
   return `<div class="buckets">${bars}</div>` +
@@ -127,12 +146,28 @@ function buildUptimeBar(componentId) {
          `</div>`;
 }
 
+// Per-day hover text: "12 Jul 2026 · 99.7% up · 5 min down · 30 min degraded (1 down, 6 degraded / 288 checks)"
+function dayTooltip(d) {
+  const date = fmtDay(d.date);
+  if (d.total === 0) return `${date} · no data`;
+  const parts = [`${fmtPct(d.upFrac)} up`];
+  if (d.outage)   parts.push(`${fmtMins(d.outage)} down`);
+  if (d.degraded) parts.push(`${fmtMins(d.degraded)} degraded`);
+  const failed = [];
+  if (d.outage)   failed.push(`${d.outage} down`);
+  if (d.degraded) failed.push(`${d.degraded} degraded`);
+  const tail = failed.length ? ` (${failed.join(", ")} / ${d.total} checks)` : "";
+  return `${date} · ${parts.join(" · ")}${tail}`;
+}
+
+// Window uptime: sample-weighted fraction of time not fully down, across all
+// observed samples (a 5-min blip costs 5 min out of the window, not a whole day).
 function uptimePct(componentId) {
   const days = aggregateDaily(componentId);
-  const known = days.filter(d => d.status !== "unknown");
-  if (known.length === 0) return "—";
-  const ok = known.filter(d => d.status === "operational").length;
-  return (ok / known.length * 100).toFixed(1) + "%";
+  let notDown = 0, total = 0;
+  for (const d of days) { notDown += d.operational + d.degraded; total += d.total; }
+  if (total === 0) return "—";
+  return fmtPct(notDown / total);
 }
 
 const TERMINAL_STATUSES = new Set(["resolved", "completed"]);
@@ -279,6 +314,32 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleString(undefined, {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short"
   });
+}
+
+// A "YYYY-MM-DD" day key -> localized date, kept in UTC to match the bucketing.
+function fmtDay(dateStr) {
+  return new Date(dateStr + "T00:00:00Z").toLocaleDateString(undefined, {
+    year: "numeric", month: "short", day: "numeric", timeZone: "UTC"
+  });
+}
+
+// Sample count -> human duration (each sample covers BUCKET_MINUTES).
+function fmtMins(samples) {
+  const mins = samples * BUCKET_MINUTES;
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+// Fraction -> percent string; keeps extra precision near 100% so a real dip
+// (e.g. 99.97%) never rounds up to a misleading "100%".
+function fmtPct(frac) {
+  if (frac >= 1) return "100%";
+  const pct = frac * 100;
+  const decimals = pct > 99.9 ? 2 : 1;
+  let s = pct.toFixed(decimals);
+  if (parseFloat(s) >= 100) s = (100 - Math.pow(10, -decimals)).toFixed(decimals);
+  return s + "%";
 }
 
 // ── Boot ────────────────────────────────────────────────────────────────────

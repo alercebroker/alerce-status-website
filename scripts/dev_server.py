@@ -7,7 +7,7 @@ Local dev server: probes endpoints and serves the status website at localhost:80
 Usage:
   python dev_server.py
   PORT=9000 python dev_server.py
-  DEMO=1 python dev_server.py    # serve demo/*.json, skip the live prober
+  DEMO=1 python dev_server.py    # serve generated demo data (fresh, dated to now), skip the live prober
 """
 
 import gzip
@@ -23,7 +23,6 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 FRONTEND_DIR = ROOT / "frontend"
 DATA_DIR = ROOT / "data"
-DEMO_DIR = ROOT / "demo"
 INCIDENTS_SRC = ROOT / "incidents" / "incidents.json"
 DEMO = os.environ.get("DEMO") == "1"
 
@@ -93,6 +92,16 @@ def prober_loop():
             print(f"[prober] error: {e}")
 
 
+def demo_loop():
+    import demo_data
+    while True:
+        time.sleep(PROBE_INTERVAL)
+        try:
+            demo_data.tick(DATA_DIR)
+        except Exception as e:
+            print(f"[demo] error: {e}")
+
+
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
         path = path.split("?", 1)[0].split("#", 1)[0]
@@ -110,9 +119,10 @@ if __name__ == "__main__":
     DATA_DIR.mkdir(exist_ok=True)
 
     if DEMO:
-        for name in ("status.json", "history.json", "incidents.json"):
-            shutil.copy(DEMO_DIR / name, DATA_DIR / name)
-        print(f"[init] DEMO mode — copied demo/*.json → data/ (prober disabled)")
+        import demo_data
+        demo_data.write_demo(DATA_DIR)
+        print("[init] DEMO mode — generated fresh demo data anchored to now (prober disabled)")
+        threading.Thread(target=demo_loop, daemon=True).start()
     else:
         if INCIDENTS_SRC.exists():
             shutil.copy(INCIDENTS_SRC, DATA_DIR / "incidents.json")
