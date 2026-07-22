@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 BUCKET = os.environ.get("STATUS_BUCKET", "")
 HISTORY_DAYS = 90
 BUCKET_MINUTES = 5  # roll up checks into 5-min windows for the history graph
+DEFAULT_TIMEOUT_S = 15  # per-endpoint override via component["timeout_s"]
 
 
 def load_config():
@@ -26,15 +27,32 @@ def load_config():
         return json.load(f)
 
 
+def _effective_thresholds(component, thresholds):
+    """Resolve latency/timeout limits for a component.
+
+    A component may override any of `latency_degraded_ms`, `latency_outage_ms`
+    or `timeout_s` inline; anything not set falls back to the global defaults.
+    This lets legitimately slow endpoints (the all-catalog crossmatch ~20 s, the
+    object-ranking query ~13 s) carry their own calibrated limits instead of
+    being flagged by the fast-endpoint defaults.
+    """
+    return (
+        component.get("latency_degraded_ms", thresholds["latency_degraded_ms"]),
+        component.get("latency_outage_ms", thresholds["latency_outage_ms"]),
+        component.get("timeout_s", thresholds.get("timeout_s", DEFAULT_TIMEOUT_S)),
+    )
+
+
 def probe(component, thresholds):
     """Return a dict with id, status, label, url, http_code, response_ms."""
     url = component["url"]
     expected = set(component.get("expected_status", [200]))
+    degraded_ms, outage_ms, timeout_s = _effective_thresholds(component, thresholds)
     start = time.monotonic()
     try:
         req = urllib.request.Request(url, method=component.get("method", "GET"))
         req.add_header("User-Agent", "alerce-status-prober/1.0")
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             code = resp.status
         elapsed_ms = (time.monotonic() - start) * 1000
     except urllib.error.HTTPError as e:
@@ -46,15 +64,32 @@ def probe(component, thresholds):
 
     if code not in expected:
         status = "outage"
-    elif elapsed_ms >= thresholds["latency_outage_ms"]:
+    elif elapsed_ms >= outage_ms:
         status = "outage"
-    elif elapsed_ms >= thresholds["latency_degraded_ms"]:
+    elif elapsed_ms >= degraded_ms:
         status = "degraded"
     else:
         status = "operational"
 
     return {"id": component["id"], "status": status, "label": component["label"],
             "url": url, "http_code": code, "response_ms": round(elapsed_ms)}
+
+
+def log_response_times(results):
+    """Emit per-component latencies to CloudWatch Logs (one JSON line each).
+
+    These raw response times are deliberately kept OUT of the public status.json
+    (operational components expose no metrics — see README/CLAUDE.md), but we log
+    them privately so thresholds can be tuned later from CloudWatch Logs Insights.
+    """
+    for r in results:
+        print(json.dumps({
+            "metric": "probe_latency",
+            "id": r["id"],
+            "status": r["status"],
+            "http_code": r["http_code"],
+            "response_ms": r["response_ms"],
+        }))
 
 
 def _worst(statuses):
@@ -184,9 +219,11 @@ def handler(event, context):
     config = load_config()
     thresholds = config["thresholds"]
 
-    # Probe all endpoints concurrently
+    # Probe endpoints sequentially: many queries fan out to different EKS pods
+    # but funnel into the same pgbouncer/Postgres, so we avoid bursting the
+    # shared connection pool with simultaneous DB-backed requests.
     results = []
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=1) as pool:
         futures = {
             pool.submit(probe, comp, thresholds): comp
             for comp in config["components"]
@@ -194,6 +231,7 @@ def handler(event, context):
         for future in as_completed(futures):
             results.append(future.result())
 
+    log_response_times(results)  # private latency log → CloudWatch
     snapshot = build_snapshot(results, config)
 
     import boto3
@@ -228,10 +266,14 @@ if __name__ == "__main__":
     os.environ.setdefault("STATUS_BUCKET", "dry-run")
     config = load_config()
     results = []
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=1) as pool:
         futures = {pool.submit(probe, c, config["thresholds"]): c for c in config["components"]}
         for f in as_completed(futures):
             results.append(f.result())
+    # Latency table (slowest first) — handy for calibrating per-endpoint thresholds
+    print("=== probe latencies (local dry-run) ===")
+    for r in sorted(results, key=lambda r: (r["response_ms"] is None, -(r["response_ms"] or 0))):
+        print(f"  {r['id']:<28} {r['status']:<12} {str(r['response_ms']):>7} ms  HTTP {r['http_code']}")
     snapshot = build_snapshot(results, config)
     update_history(_FakeS3(), snapshot)
     print(json.dumps(snapshot, indent=2))

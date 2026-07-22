@@ -4,11 +4,11 @@ Public status page for the ALeRCE astronomical broker, deployed at `status.alerc
 
 ## Architecture (Stage 1)
 
-- **Lambda** (`lambda/prober.py`) — runs every minute via EventBridge, HTTP-probes all public endpoints, writes `status.json` + `history.json` to S3.
+- **Lambda** (`lambda/prober.py`) — runs every 5 minutes via EventBridge, HTTP-probes all public endpoints **sequentially** (to avoid bursting shared backends), writes `status.json` + `history.json` to S3.
 - **S3 + CloudFront** — static frontend served at `status.alerce.online`; data files served under `/data/*`.
 - **Incidents** — `incidents/incidents.json` in this repo; CI uploads it to S3 on every push to `main`.
 
-Raw metrics (latency, HTTP codes) are never exposed in the output JSON — only `operational / degraded / outage` labels.
+Raw metrics (latency, HTTP codes) are never exposed in the output JSON — only `operational / degraded / outage` labels. Per-probe response times are logged **privately** to the Lambda's CloudWatch Logs (`metric=probe_latency`), so thresholds can be tuned from Logs Insights without publishing latency.
 
 Stage 2 (pipeline + Prometheus signals from on-prem) is not yet designed.
 
@@ -31,7 +31,7 @@ pytest lambda/tests/ -v
 
 ### Code changes (Lambda or frontend)
 
-Push to `main` (via PR — `main` is protected, 1 approving review + `test` check required). The **Deploy** workflow tests, then deploys after a required reviewer approves in the `production` environment. The auto-deploy role (`alerce-status-website-github-deploy-v2`) is scoped to specific resource ARNs and carries a permissions boundary — it cannot touch IAM or create resources.
+Open a PR to `main`. `main` is protected: the `test` check must pass and a repo **admin** must approve (enforced via [.github/CODEOWNERS](.github/CODEOWNERS)); repo admins bypass branch protection and can self-merge their own PRs. Merging **auto-deploys** — the **Deploy** workflow runs `test`, then deploys straight to the `production` environment with no manual approval step. The auto-deploy role (`alerce-status-website-github-deploy-v2`) is scoped to specific resource ARNs and carries a permissions boundary — it cannot touch IAM or create resources.
 
 ### Infrastructure changes (Terraform)
 
@@ -69,14 +69,20 @@ Edit `lambda/config.json`. Fields per component:
 |---|---|
 | `id` | Unique identifier (used in history tracking) |
 | `label` | Display name in the UI |
-| `group` | `apis` or `frontends` |
+| `group` | `apis` (ZTF), `apis_lsst` (multi-survey / LSST), or `frontends`. A new group value also needs a container in `frontend/index.html` and an entry in the `groups` map in `frontend/app.js`. |
 | `url` | URL to probe |
 | `method` | HTTP method (usually `GET`) |
 | `expected_status` | List of acceptable HTTP status codes |
+| `latency_degraded_ms` | *(optional)* per-endpoint override of the global degraded threshold |
+| `latency_outage_ms` | *(optional)* per-endpoint override of the global outage threshold |
+| `timeout_s` | *(optional)* per-endpoint request timeout override |
 
-Thresholds (`thresholds` key):
-- `latency_degraded_ms` — response slower than this → degraded (default 2000 ms)
+Global defaults (`thresholds` key), used when a component doesn't override them:
+- `latency_degraded_ms` — response slower than this → degraded (default 4000 ms)
 - `latency_outage_ms` — response slower than this → outage (default 10000 ms)
+- `timeout_s` — request timeout (default 15 s)
+
+Slow-by-design endpoints (e.g. the all-catalog crossmatch ~20 s, the object-ranking query ~13 s) set their own higher `latency_*`/`timeout_s` so the tight fast-endpoint defaults don't flag them. `python lambda/prober.py` prints a slowest-first latency table to help calibrate these.
 
 ## Posting an incident or maintenance note
 

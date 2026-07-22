@@ -174,6 +174,82 @@ def test_probe_slow_response_is_degraded(monkeypatch):
     assert prober.probe(_make_component(), THRESHOLDS)["status"] == "degraded"
 
 
+# --- per-endpoint threshold / timeout overrides ---
+
+GLOBAL = {"latency_degraded_ms": 2000, "latency_outage_ms": 10000, "timeout_s": 15}
+
+
+def test_effective_thresholds_fall_back_to_global():
+    assert prober._effective_thresholds(_make_component(), GLOBAL) == (2000, 10000, 15)
+
+
+def test_effective_thresholds_component_overrides_win():
+    comp = _make_component()
+    comp.update({"latency_degraded_ms": 25000, "latency_outage_ms": 35000, "timeout_s": 40})
+    assert prober._effective_thresholds(comp, GLOBAL) == (25000, 35000, 40)
+
+
+def test_effective_thresholds_timeout_defaults_when_absent_everywhere():
+    # Global thresholds without timeout_s (as in the current test CONFIG) → DEFAULT_TIMEOUT_S
+    _, _, timeout = prober._effective_thresholds(_make_component(), THRESHOLDS)
+    assert timeout == prober.DEFAULT_TIMEOUT_S
+
+
+def test_probe_slow_response_operational_under_override(monkeypatch):
+    """A latency the global limits would call 'outage' stays 'operational' when the
+    component raises its own thresholds (e.g. the ~20 s all-catalog crossmatch)."""
+    def fake_urlopen(req, timeout):
+        return _MockHTTPResponse(200)
+    call = [0]
+    def fake_monotonic():
+        call[0] += 1
+        return 0.0 if call[0] == 1 else 20.0  # 20 000 ms elapsed
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.monotonic", fake_monotonic)
+    comp = _make_component()
+    comp.update({"latency_degraded_ms": 25000, "latency_outage_ms": 35000})
+    assert prober.probe(comp, THRESHOLDS)["status"] == "operational"
+
+
+def test_probe_uses_component_timeout(monkeypatch):
+    captured = {}
+    def fake_urlopen(req, timeout):
+        captured["timeout"] = timeout
+        return _MockHTTPResponse(200)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    comp = _make_component()
+    comp["timeout_s"] = 40
+    prober.probe(comp, THRESHOLDS)
+    assert captured["timeout"] == 40
+
+
+def test_probe_uses_default_timeout_when_not_overridden(monkeypatch):
+    captured = {}
+    def fake_urlopen(req, timeout):
+        captured["timeout"] = timeout
+        return _MockHTTPResponse(200)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    prober.probe(_make_component(), THRESHOLDS)
+    assert captured["timeout"] == prober.DEFAULT_TIMEOUT_S
+
+
+# --- private latency logging (CloudWatch) ---
+
+def test_log_response_times_emits_one_json_line_per_component(capsys):
+    results = [
+        {"id": "a", "status": "operational", "http_code": 200, "response_ms": 120},
+        {"id": "b", "status": "outage", "http_code": None, "response_ms": None},
+    ]
+    prober.log_response_times(results)
+    lines = [l for l in capsys.readouterr().out.strip().splitlines() if l.strip()]
+    assert len(lines) == 2
+    parsed = [json.loads(l) for l in lines]
+    # Operational components' latency IS logged privately (unlike the public snapshot)
+    assert parsed[0] == {"metric": "probe_latency", "id": "a", "status": "operational",
+                         "http_code": 200, "response_ms": 120}
+    assert parsed[1]["response_ms"] is None
+
+
 # --- history update ---
 
 class _FakeS3:

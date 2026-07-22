@@ -1,7 +1,8 @@
 {
   "thresholds": {
-    "latency_degraded_ms": 2000,
-    "latency_outage_ms": 10000
+    "latency_degraded_ms": 4000,
+    "latency_outage_ms": 10000,
+    "timeout_s": 15
   },
   "components": [
     {
@@ -9,7 +10,7 @@
       "label": "ZTF Object API",
       "group": "apis",
       "description": "Queries metadata for ZTF alert objects (name, coordinates, first/last detection).",
-      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp",
+      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aaawjhl",
       "method": "GET",
       "expected_status": [200, 404]
     },
@@ -18,7 +19,7 @@
       "label": "ZTF Lightcurve API",
       "group": "apis",
       "description": "Returns detections and non-detections (the photometric light curve) for a ZTF object.",
-      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/lightcurve",
+      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aaawjhl/lightcurve",
       "method": "GET",
       "expected_status": [200, 404]
     },
@@ -27,7 +28,7 @@
       "label": "ZTF Magstats API",
       "group": "apis",
       "description": "Per-band magnitude statistics (min, max, mean) for a ZTF object.",
-      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/magstats",
+      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aaawjhl/magstats",
       "method": "GET",
       "expected_status": [200, 404]
     },
@@ -36,7 +37,7 @@
       "label": "ZTF Probabilities API",
       "group": "apis",
       "description": "Classifier probabilities (e.g. SN, AGN, variable star) for a ZTF object.",
-      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/probabilities",
+      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aaawjhl/probabilities",
       "method": "GET",
       "expected_status": [200, 404]
     },
@@ -45,7 +46,7 @@
       "label": "ZTF Features API",
       "group": "apis",
       "description": "Light-curve features used as input to ALeRCE classifiers.",
-      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aarunpp/features",
+      "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aaawjhl/features",
       "method": "GET",
       "expected_status": [200, 404]
     },
@@ -63,43 +64,34 @@
       "label": "ZTF Forced Photometry API",
       "group": "apis",
       "description": "Forced-photometry light curves (flux measured at a fixed position) for ZTF objects.",
-      "url": "https://api.alerce.online/v2/lightcurve/forced-photometry/ZTF18aarunpp",
+      "url": "https://api.alerce.online/v2/lightcurve/forced-photometry/ZTF18aaawjhl",
       "method": "GET",
       "expected_status": [200]
     },
     {
-      "id": "api-lsst-objects",
-      "label": "Multi-survey Object API",
+      "id": "api-ztf-lightcurve-v2",
+      "label": "ZTF Lightcurve API (v2)",
       "group": "apis",
-      "description": "Object metadata API for the multi-survey (LSST-era) backend.",
-      "url": "https://api-lsst.alerce.online/object_api/openapi.json",
+      "description": "Combined light curve (detections, non-detections, forced photometry) from the v2 lightcurve service used by the object page.",
+      "url": "https://api.alerce.online/v2/lightcurve/lightcurve/ZTF18aaawjhl",
       "method": "GET",
       "expected_status": [200]
     },
     {
-      "id": "api-lsst-lightcurve",
-      "label": "Multi-survey Lightcurve API",
+      "id": "api-ztf-object-list",
+      "label": "ZTF Object List / Ranking",
       "group": "apis",
-      "description": "Light-curve API for the multi-survey (LSST-era) backend.",
-      "url": "https://api-lsst.alerce.online/lightcurve_api/openapi.json",
+      "description": "Paginated object search with classifier ranking — the query behind the Explorer results page.",
+      "url": "https://api.alerce.online/alerts/v1/objects/?ranking=1&count=false&page=1&class=SNIa&classifier=lc_classifier_BHRF_forced_phot&page_size=20&order_by=probability&order_mode=DESC",
       "method": "GET",
       "expected_status": [200]
     },
     {
-      "id": "api-lsst-probability",
-      "label": "Multi-survey Probability API",
+      "id": "api-ztf-dr-lightcurve",
+      "label": "ZTF Data Release Lightcurve",
       "group": "apis",
-      "description": "Classifier probabilities API for the multi-survey (LSST-era) backend.",
-      "url": "https://api-lsst.alerce.online/probability_api/openapi.json",
-      "method": "GET",
-      "expected_status": [200]
-    },
-    {
-      "id": "api-lsst-stamps",
-      "label": "Multi-survey Stamps API",
-      "group": "apis",
-      "description": "Image stamps (science, reference, difference) for multi-survey objects.",
-      "url": "https://api-lsst.alerce.online/stamps_api/openapi.json",
+      "description": "ZTF data-release photometry cone-search (the external-sources feature on the light curve).",
+      "url": "https://api.alerce.online/ztf/dr/v1/light_curve/?ra=86.4547530670479&dec=44.65756277176393&radius=1.5",
       "method": "GET",
       "expected_status": [200]
     },
@@ -114,12 +106,144 @@
     },
     {
       "id": "api-crossmatch",
-      "label": "Crossmatch API",
+      "label": "Crossmatch backend (catshtm)",
       "group": "apis",
-      "description": "Cone-search crossmatch against external catalogs (Gaia, AllWISE, etc.).",
-      "url": "https://catshtm.alerce.online/conesearch_all?catalog=GAIA%2FDR2&ra=148.8222&dec=69.0654&radius=10",
+      "description": "Direct all-catalog cone-search against the catshtm backend (Gaia, AllWISE, etc.) — the service behind the object-page crossmatch. Position-dependent latency, so it carries its own latency limits.",
+      "url": "https://catshtm.alerce.online/crossmatch_all?ra=86.4547530670479&dec=44.65756277176393&radius=20",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 25000,
+      "latency_outage_ms": 35000,
+      "timeout_s": 40
+    },
+    {
+      "id": "api-ztf-htmx-object",
+      "label": "ZTF Object Page — Info",
+      "group": "apis",
+      "description": "Object metadata panel (HTMX) rendered on the ZTF object page.",
+      "url": "https://api.alerce.online/v2/object_details/htmx/object/ZTF18aaawjhl",
       "method": "GET",
       "expected_status": [200]
+    },
+    {
+      "id": "api-ztf-htmx-lightcurve",
+      "label": "ZTF Object Page — Lightcurve",
+      "group": "apis",
+      "description": "Light-curve widget (HTMX) rendered on the ZTF object page. Heavy for high-detection objects, so it carries its own latency limits.",
+      "url": "https://api.alerce.online/v2/lightcurve/htmx/lightcurve?oid=ZTF18aaawjhl",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 10000,
+      "latency_outage_ms": 20000,
+      "timeout_s": 25
+    },
+    {
+      "id": "api-ztf-htmx-magstats",
+      "label": "ZTF Object Page — Magstats",
+      "group": "apis",
+      "description": "Per-band magnitude statistics (HTMX) rendered on the ZTF object page.",
+      "url": "https://api.alerce.online/v2/magstats/htmx/mag/ZTF18aaawjhl",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "api-ztf-htmx-probabilities",
+      "label": "ZTF Object Page — Probabilities",
+      "group": "apis",
+      "description": "Classifier probabilities (HTMX) rendered on the ZTF object page.",
+      "url": "https://api.alerce.online/v2/probability/htmx/probabilities/ZTF18aaawjhl",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "api-ztf-htmx-crossmatch",
+      "label": "ZTF Object Page — Crossmatch",
+      "group": "apis",
+      "description": "External-catalog crossmatch (HTMX) rendered on the ZTF object page — the user-facing path in front of the catshtm backend. Position-dependent latency, so it carries its own limits.",
+      "url": "https://api.alerce.online/v2/xmatch/htmx/crossmatch/ZTF18aaawjhl",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 20000,
+      "latency_outage_ms": 30000,
+      "timeout_s": 30
+    },
+    {
+      "id": "api-ztf-htmx-tns",
+      "label": "ZTF Object Page — TNS",
+      "group": "apis",
+      "description": "Transient Name Server lookup (HTMX) rendered on the ZTF object page.",
+      "url": "https://api.alerce.online/v2/object_details/htmx/tns/?ra=86.4547530670479&dec=44.65756277176393",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "lsst-object-information",
+      "label": "Object Info",
+      "group": "apis_lsst",
+      "description": "Object metadata panel (HTMX) for multi-survey / LSST objects.",
+      "url": "https://api-lsst.alerce.online/object_api/htmx/object_information?oid=170591527609303944&survey_id=lsst",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "lsst-object-list",
+      "label": "Object List / Ranking",
+      "group": "apis_lsst",
+      "description": "Paginated object search with classifier ranking (HTMX) — the multi-survey results table. Inherently heavy, so it carries its own latency limits.",
+      "url": "https://api-lsst.alerce.online/object_api/htmx/list_objects?survey=lsst&ranking=1&page=1&page_size=20&count=false&order_by=probability&order_mode=DESC",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 20000,
+      "latency_outage_ms": 30000,
+      "timeout_s": 35
+    },
+    {
+      "id": "lsst-lightcurve",
+      "label": "Lightcurve",
+      "group": "apis_lsst",
+      "description": "Light-curve widget (HTMX) for multi-survey / LSST objects.",
+      "url": "https://api-lsst.alerce.online/lightcurve_api/htmx/lightcurve?oid=170591527609303944&survey_id=lsst",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "lsst-magstats",
+      "label": "Magstats",
+      "group": "apis_lsst",
+      "description": "Per-band magnitude statistics (HTMX) for multi-survey / LSST objects.",
+      "url": "https://api-lsst.alerce.online/magstat_api/htmx/mag?oid=170591527609303944&survey_id=lsst",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "lsst-probabilities",
+      "label": "Probabilities",
+      "group": "apis_lsst",
+      "description": "Classifier probabilities (HTMX) for multi-survey / LSST objects.",
+      "url": "https://api-lsst.alerce.online/probability_api/htmx/probabilities/170591527609303944",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "lsst-stamps",
+      "label": "Stamps",
+      "group": "apis_lsst",
+      "description": "Image stamps card (HTMX) for multi-survey / LSST objects.",
+      "url": "https://api-lsst.alerce.online/stamps_api/htmx/stamp_card?oid=170591527609303944&survey_id=lsst",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "lsst-crossmatch",
+      "label": "Crossmatch",
+      "group": "apis_lsst",
+      "description": "External-catalog crossmatch (HTMX) for multi-survey / LSST objects. Depends on the slow catshtm service, so it carries its own latency limits.",
+      "url": "https://api-lsst.alerce.online/crossmatch_api/htmx/crossmatch?oid=170591527609303944&survey_id=lsst",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 20000,
+      "latency_outage_ms": 35000,
+      "timeout_s": 40
     },
     {
       "id": "frontend-explorer",

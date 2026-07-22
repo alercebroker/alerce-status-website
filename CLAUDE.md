@@ -7,7 +7,7 @@ See `README.md` for user-facing setup, local dev, and deployment instructions. T
 ## Architecture (Stage 1 — public probes only)
 
 ```
-EventBridge (1 min) → Lambda prober → S3 (data bucket) ← CloudFront ← user
+EventBridge (5 min) → Lambda prober → S3 (data bucket) ← CloudFront ← user
                                        ↑
                               GitHub Actions on push to main
                               (frontend sync + incidents.json)
@@ -24,17 +24,21 @@ Stage 2 (pipeline + Prometheus signals from on-prem) is **deferred and not yet d
 
 **No frameworks, no dependencies.** Python stdlib for the prober/dev server, plain HTML/CSS/JS for the frontend. Don't add Flask, React, requests, etc. `boto3` is the only allowed runtime import beyond stdlib (it's preinstalled in the Lambda runtime).
 
-**No raw metrics in the output JSON for operational components.** `status.json` exposes only `operational | degraded | outage` labels for healthy components. `probe_url`, `http_code`, and `response_ms` are included only when a component is non-operational, for diagnostic display. Don't add latency series, percentiles, or per-probe details to the public payload.
+**No raw metrics in the output JSON for operational components.** `status.json` exposes only `operational | degraded | outage` labels for healthy components. `probe_url`, `http_code`, and `response_ms` are included only when a component is non-operational, for diagnostic display. Don't add latency series, percentiles, or per-probe details to the public payload. Raw `response_ms` for **every** probe (operational included) is instead logged **privately** to the Lambda's CloudWatch Logs — one JSON line per probe, `metric=probe_latency` (see `log_response_times()`) — for threshold tuning via Logs Insights. Keep latency in the logs, never in the public payload.
 
 **HA was a deliberate choice over simplicity.** The Lambda + S3 + CloudFront design exists because the status page must stay up even when ALeRCE infra is down. Don't propose collapsing to a single EC2 / single-region setup.
 
-**Status mapping** lives in `probe()`: HTTP code not in `expected_status` → outage; latency ≥ `latency_outage_ms` → outage; ≥ `latency_degraded_ms` → degraded; else operational. `expected_status` per endpoint can include `404` when "404 from a real API" is still proof the service is up.
+**Status mapping** lives in `probe()`: HTTP code not in `expected_status` → outage; latency ≥ `latency_outage_ms` → outage; ≥ `latency_degraded_ms` → degraded; else operational. `expected_status` per endpoint can include `404` when "404 from a real API" is still proof the service is up. Thresholds default to the global `thresholds` block, but any component may override `latency_degraded_ms`, `latency_outage_ms`, and/or `timeout_s` inline (`_effective_thresholds()`). This "hybrid" scheme keeps fast endpoints on tight absolute defaults while giving legitimately slow endpoints (all-catalog crossmatch ~20 s, object-ranking ~13 s) their own calibrated limits.
 
-**History is bucketed in 5-minute windows** (`BUCKET_MINUTES`) and kept for 90 days (`HISTORY_DAYS`). Re-runs within the same bucket are idempotent (existing entry for that `ts` is replaced).
+**Probes run sequentially** (`ThreadPoolExecutor(max_workers=1)`): many endpoints fan out to different EKS pods but share one pgbouncer/Postgres, so concurrent probing would burst the shared pool. A full sequential run can take ~2-3 min with the slow endpoints — hence the Lambda `timeout = 240` and the 5-min schedule (no overlap).
+
+**History is bucketed in 5-minute windows** (`BUCKET_MINUTES`) and kept for 90 days (`HISTORY_DAYS`). Re-runs within the same bucket are idempotent (existing entry for that `ts` is replaced). `history.json` is written to S3 **gzipped** (`Content-Encoding: gzip`, `Cache-Control: max-age=60`) — it's large and highly repetitive, and exceeds CloudFront's 10 MB auto-compression limit, so the prober compresses at the origin. The read-back detects the gzip magic byte, so the read-modify-write cycle round-trips; the local dev server stores it decompressed on disk. `status.json` stays uncompressed and `no-cache`.
 
 ## Adding / changing probes
 
-Edit [lambda/config.json](lambda/config.json). Each component needs `id` (stable — used as the history key), `label`, `group` (`apis` or `frontends`), `url`, `method`, `expected_status`. Run `python lambda/prober.py` locally to dry-run.
+Edit [lambda/config.json](lambda/config.json). Each component needs `id` (stable — used as the history key), `label`, `group`, `url`, `method`, `expected_status`. Optional per-endpoint overrides: `latency_degraded_ms`, `latency_outage_ms`, `timeout_s` (any omitted key falls back to the global `thresholds`). Run `python lambda/prober.py` locally to dry-run — it prints a slowest-first latency table for calibrating those overrides.
+
+Groups are `apis` (ZTF), `apis_lsst` (multi-survey / LSST), or `frontends`. Both object pages are HTMX-rendered by the same `multisurveys-apis` services, just mounted per survey: the **LSST** site loads `api-lsst.alerce.online/{service}_api/htmx/*`; the **ZTF** site loads `api.alerce.online/v2/{service}/htmx/*` (e.g. `/v2/object_details/htmx/object/{oid}`, `/v2/xmatch/htmx/crossmatch/{oid}`) — each service is its own target group. We probe these real `htmx/*` render endpoints (verified from a browser HAR, not the stale `ztf_explorer`/`alerts/v1` source) rather than `openapi.json` liveness. The older `alerts/v1`/`ztf/v1` REST probes are kept as backend coverage alongside the htmx ones. Adding a **new** group value also requires a matching container `<div id="<group>-rows">` in [frontend/index.html](frontend/index.html) and an entry in the `groups` map in [frontend/app.js](frontend/app.js).
 
 ## Posting an incident
 
@@ -58,6 +62,8 @@ There's no headless test for the frontend. For UI work, run `python scripts/dev_
 - **No `*:*` permissions.** Don't grant `s3:*` on `*`, `iam:*` on `*`, or `PowerUserAccess` — even temporarily. If a Terraform resource needs a new permission, add the specific action scoped to the specific resource.
 - **OIDC trust must be scoped.** The GitHub OIDC role trusts only `repo:alercebroker/alerce-status-website` with `environment:production` or `environment:staging`. Don't widen this to `*` refs or other repos.
 - **Don't touch resources outside this project.** No edits to other ALeRCE buckets, Lambdas, IAM roles, or Route53 records (other than the validation/alias records this project owns under `alerce.online`). If a fix seems to require it, stop and ask.
+
+**Deploys are automatic on merge to `main`** — there is no manual approval step in the `production` environment, so merge authorization *is* deploy authorization. `main` requires a passing `test` check and an approving review from a repo **admin** (enforced via [.github/CODEOWNERS](.github/CODEOWNERS)); repo admins bypass branch protection and can self-merge. Widening who can merge to `main` — or who is listed as a code owner — widens who can deploy to production.
 
 **Before any AWS-affecting action, state the blast radius.** What resources can this touch? What's the cost ceiling if it goes wrong? What does it depend on outside this project? Ask before applying if the answer is "I'm not sure."
 
