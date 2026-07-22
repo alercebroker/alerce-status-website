@@ -30,13 +30,13 @@ def _make_result(cid, label, status, code=200, ms=100):
 
 # --- field structure ---
 
-def test_operational_components_have_no_diagnostic_fields():
-    """Operational components must not expose probe_url, http_code, or response_ms."""
+def test_operational_components_expose_url_but_not_metrics():
+    """Operational components carry probe_url (public) but never http_code/response_ms (metrics)."""
     results = [_make_result("api-object", "Object API", "operational"),
                _make_result("api-lightcurve", "Lightcurve API", "operational")]
     snapshot = prober.build_snapshot(results, CONFIG)
     for comp in snapshot["components"]:
-        assert "probe_url" not in comp
+        assert comp["probe_url"] == "https://example.com"
         assert "http_code" not in comp
         assert "response_ms" not in comp
 
