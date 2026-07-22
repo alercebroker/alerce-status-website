@@ -183,6 +183,28 @@ footer {
 }
 .info:hover, .info:focus { color: var(--accent); border-color: var(--accent); outline: none; }
 
+/* Floating tooltip for the "?" descriptions (positioned by app.js, on <body> to
+   escape the card's overflow:hidden). Kept in layout at opacity 0 so its size is
+   measurable before it's shown. */
+#tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  max-width: 260px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--text);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+#tooltip.show { opacity: 1; }
+
 /* ── Incidents ── */
 .incident {
   padding: 16px 20px;
