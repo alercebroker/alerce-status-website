@@ -35,7 +35,8 @@ function renderBanner(snapshot) {
 }
 
 function renderComponents(snapshot) {
-  const groups = { apis: {label: "Public APIs", el: document.getElementById("apis-rows")},
+  const groups = { apis: {label: "ZTF APIs", el: document.getElementById("apis-rows")},
+                   apis_lsst: {label: "Multi-survey (LSST) APIs", el: document.getElementById("apis-lsst-rows")},
                    frontends: {label: "Frontends & Docs", el: document.getElementById("frontends-rows")} };
 
   for (const g of Object.values(groups)) {
