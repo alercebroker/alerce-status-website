@@ -22,7 +22,7 @@ variable "environment" {
 }
 
 variable "probe_interval_minutes" {
-  description = "How often the prober Lambda runs (in minutes)"
+  description = "How often the prober Lambda runs (in minutes). Aligns with the 5-min history buckets: one probe per bucket. Probes run sequentially to avoid bursting shared backends."
   type        = number
-  default     = 1
+  default     = 5
 }
