@@ -4,6 +4,11 @@ operational/degraded/outage, and writes status.json + history.json to S3.
 
 Non-operational components include probe_url, http_code, and response_ms
 for diagnostic display. Operational components omit these fields.
+
+On each run it also compares the new snapshot against the previously published
+status.json and, if any component got worse or fully recovered, publishes one
+aggregated SNS alert (rich message with HTTP code / latency). Alerting is
+best-effort — a notification failure never blocks the status/history writes.
 """
 
 import gzip
@@ -16,9 +21,17 @@ from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BUCKET = os.environ.get("STATUS_BUCKET", "")
+ALERT_TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN", "")  # empty → alerting disabled
 HISTORY_DAYS = 90
 BUCKET_MINUTES = 5  # roll up checks into 5-min windows for the history graph
 DEFAULT_TIMEOUT_S = 15  # per-endpoint override via component["timeout_s"]
+STATUS_PAGE_URL = "https://status.alerce.online"
+
+# Severity ranking for state-change detection. We alert when a component gets
+# WORSE (rank increases above operational, incl. degraded→outage escalation) and
+# when it fully RECOVERS (returns to operational). Partial recovery
+# (outage→degraded) does not re-page.
+_SEVERITY = {"operational": 0, "degraded": 1, "outage": 2}
 
 
 def load_config():
@@ -219,6 +232,120 @@ def update_history(s3, snapshot):
     )
 
 
+def read_prev_status(s3):
+    """Return {id: status} from the currently-stored status.json, or None.
+
+    None means "no baseline" (first-ever run or an unreadable object) — the
+    caller then skips alerting so a fresh deploy doesn't fire on everything.
+    """
+    try:
+        obj = s3.get_object(Bucket=BUCKET, Key="data/status.json")
+        data = json.loads(obj["Body"].read())
+        return {c["id"]: c["status"] for c in data.get("components", [])}
+    except s3.exceptions.NoSuchKey:
+        return None
+    except Exception:
+        return None
+
+
+def compute_transitions(prev_status, snapshot):
+    """Diff the new snapshot against prev_status → list of alertable transitions.
+
+    Emits a transition when a component gets worse (rank increases above
+    operational) or fully recovers (returns to operational). Components with no
+    baseline (prev_status is None, or a newly-added component absent from it) are
+    established silently. Partial recovery (outage→degraded) is intentionally not
+    reported.
+    """
+    if not prev_status:
+        return []
+    transitions = []
+    for comp in snapshot["components"]:
+        prev = prev_status.get(comp["id"])
+        if prev is None:
+            continue  # newly-added component — set a baseline, don't alert
+        new = comp["status"]
+        if new == prev:
+            continue
+        prev_rank = _SEVERITY.get(prev, 0)
+        new_rank = _SEVERITY.get(new, 0)
+        if new_rank > prev_rank and new_rank > 0:
+            kind = "down"       # worse / escalation
+        elif new_rank == 0 and prev_rank > 0:
+            kind = "recovered"  # all-clear
+        else:
+            continue            # partial recovery — don't re-page
+        transitions.append({
+            "id": comp["id"], "label": comp["label"], "kind": kind,
+            "prev": prev, "new": new,
+            "http_code": comp.get("http_code"),
+            "response_ms": comp.get("response_ms"),
+        })
+    return transitions
+
+
+def _subject_names(transitions):
+    labels = [t["label"] for t in transitions]
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return f"{labels[0]} and {len(labels) - 1} more"
+
+
+def format_alert(transitions, overall_status):
+    """Build (subject, body) for an SNS alert. Subject is ASCII (SNS requirement)."""
+    downs = [t for t in transitions if t["kind"] == "down"]
+    ups = [t for t in transitions if t["kind"] == "recovered"]
+
+    if downs:
+        word = "down" if any(t["new"] == "outage" for t in downs) else "degraded"
+        subject = f"ALeRCE Status: {_subject_names(downs)} {word}"
+        if ups:
+            subject += f" (+{len(ups)} recovered)"
+    else:
+        subject = f"ALeRCE Status: {_subject_names(ups)} recovered"
+    # SNS rejects non-ASCII subjects (which would silently drop the alert); labels
+    # are ASCII today, but strip defensively.
+    subject = subject.encode("ascii", "ignore").decode()[:100]
+
+    lines = []
+    for t in downs:
+        icon = "\U0001F534" if t["new"] == "outage" else "\U0001F7E1"  # 🔴 / 🟡
+        detail = []
+        if t["http_code"] is not None:
+            detail.append(f"HTTP {t['http_code']}")
+        if t["response_ms"] is not None:
+            detail.append(f"{t['response_ms']} ms")
+        suffix = f" ({', '.join(detail)})" if detail else ""
+        lines.append(f"{icon} {t['label']}: {t['prev']} → {t['new']}{suffix}")
+    for t in ups:
+        lines.append(f"\U0001F7E2 {t['label']}: {t['prev']} → {t['new']}")  # 🟢
+
+    body = "\n".join(lines) + f"\n\nOverall: {overall_status}\n{STATUS_PAGE_URL}"
+    return subject, body
+
+
+def maybe_alert(sns, topic_arn, prev_status, snapshot):
+    """Best-effort: publish one aggregated SNS alert for this run's transitions.
+
+    Never raises — a notification failure must not break the status write. Returns
+    the transitions that triggered an alert (empty if none / disabled / failed).
+    """
+    if not topic_arn:
+        return []
+    try:
+        transitions = compute_transitions(prev_status, snapshot)
+        if not transitions:
+            return []
+        subject, body = format_alert(transitions, snapshot["status"])
+        sns.publish(TopicArn=topic_arn, Subject=subject, Message=body)
+        return transitions
+    except Exception as e:
+        print(json.dumps({"metric": "alert_error", "error": repr(e)}))
+        return []
+
+
 def handler(event, context):
     config = load_config()
     thresholds = config["thresholds"]
@@ -241,6 +368,10 @@ def handler(event, context):
     import boto3
     s3 = boto3.client("s3")
 
+    # Read the previously published statuses BEFORE overwriting status.json, so
+    # we can diff for state changes after the write.
+    prev_status = read_prev_status(s3)
+
     s3.put_object(
         Bucket=BUCKET,
         Key="data/status.json",
@@ -250,6 +381,11 @@ def handler(event, context):
     )
 
     update_history(s3, snapshot)
+
+    # Alerting is best-effort and runs last: the data writes above must not depend
+    # on it. maybe_alert swallows its own errors.
+    if ALERT_TOPIC_ARN:
+        maybe_alert(boto3.client("sns"), ALERT_TOPIC_ARN, prev_status, snapshot)
 
     return {"statusCode": 200, "overall": snapshot["status"]}
 

@@ -26,3 +26,9 @@ variable "probe_interval_minutes" {
   type        = number
   default     = 5
 }
+
+variable "alert_email" {
+  description = "Email endpoint for the alerts SNS topic — typically a Slack channel's email-integration address. Supplied at apply time (never committed); the subscription must be confirmed once from the receiving inbox/channel."
+  type        = string
+  sensitive   = true
+}
