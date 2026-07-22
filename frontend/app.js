@@ -50,14 +50,15 @@ function renderComponents(snapshot) {
     const bar = buildUptimeBar(comp.id);
 
     let detailsHtml = "";
-    if (comp.status !== "operational" && comp.probe_url) {
+    if (comp.probe_url) {
       const meta = [];
       if (comp.http_code != null) meta.push(`HTTP ${esc(String(comp.http_code))}`);
       if (comp.response_ms != null) meta.push(`${esc(String(comp.response_ms))} ms`);
       meta.push(`Last checked: ${esc(fmtDate(comp.checked_at))}`);
+      const summaryLabel = comp.status === "operational" ? "Endpoint" : "Affected endpoint";
       detailsHtml = `
         <details class="probe-details">
-          <summary>Affected endpoint</summary>
+          <summary>${summaryLabel}</summary>
           <div class="probe-detail-content">
             <a href="${esc(comp.probe_url)}" target="_blank" rel="noopener">${esc(comp.probe_url)}</a>
             &nbsp;· ${meta.join(" · ")}

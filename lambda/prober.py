@@ -138,8 +138,12 @@ def build_snapshot(probe_results, config):
         }
         if comp.get("description"):
             entry["description"] = comp["description"]
+        # probe_url is public (all probed endpoints are public APIs), so expose it
+        # for every component — the UI shows it in a per-row expander.
+        entry["probe_url"] = r["url"] if r else comp["url"]
+        # http_code / response_ms stay diagnostic-only: the public payload must not
+        # carry per-probe metrics for healthy components.
         if status != "operational":
-            entry["probe_url"] = r["url"] if r else comp["url"]
             if r and r["http_code"] is not None:
                 entry["http_code"] = r["http_code"]
             if r and r["response_ms"] is not None:
