@@ -187,15 +187,33 @@
     },
     {
       "id": "lsst-object-list",
-      "label": "Object List / Ranking",
+      "label": "Object List (unfiltered)",
       "group": "apis_lsst",
-      "description": "Paginated object search with classifier ranking (HTMX) — the multi-survey results table. Inherently heavy, so it carries its own latency limits.",
-      "url": "https://api-lsst.alerce.online/object_api/htmx/list_objects?survey=lsst&ranking=1&page=1&page_size=20&count=false&order_by=probability&order_mode=DESC",
+      "description": "Unfiltered paginated object search (HTMX) — what the multi-survey results table loads for a search with no filters set. The heaviest LSST query, so it carries its own latency limits.",
+      "url": "https://api-lsst.alerce.online/object_api/htmx/list_objects?survey=lsst&page=1&page_size=20&count=false",
       "method": "GET",
       "expected_status": [200],
       "latency_degraded_ms": 20000,
       "latency_outage_ms": 30000,
       "timeout_s": 35
+    },
+    {
+      "id": "lsst-object-list-night",
+      "label": "SN Candidates (night)",
+      "group": "apis_lsst",
+      "description": "Object search filtered by classifier, class and MJD night (HTMX) — the supernova-candidates-per-night query behind the LSST SN hunter. Filtered, so much faster than the unfiltered search.",
+      "url": "https://api-lsst.alerce.online/object_api/htmx/list_objects?classifier=stamp_classifier_rubin_beta&class_name=SN&survey=lsst&firstmjd=61200&lastmjd=61201&page=1&page_size=20&count=false",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "lsst-side-objects",
+      "label": "Object Sidebar",
+      "group": "apis_lsst",
+      "description": "Object navigation sidebar (HTMX) — the neighbouring-objects list loaded when stepping between objects within a filtered result set.",
+      "url": "https://api-lsst.alerce.online/object_api/htmx/side_objects?classifier=stamp_classifier_rubin_beta_20260421&class_name=SN&survey=lsst&firstmjd=61207&lastmjd=61208&page=1&page_size=20&count=false",
+      "method": "GET",
+      "expected_status": [200]
     },
     {
       "id": "lsst-lightcurve",
