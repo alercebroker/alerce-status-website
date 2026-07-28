@@ -99,7 +99,7 @@ Edit `lambda/config.json`. Fields per component:
 |---|---|
 | `id` | Unique identifier (used in history tracking) |
 | `label` | Display name in the UI |
-| `group` | `apis` (ZTF), `apis_lsst` (multi-survey / LSST), or `frontends`. A new group value also needs a container in `frontend/index.html` and an entry in the `groups` map in `frontend/app.js`. |
+| `group` | `apis` (ZTF), `apis_lsst` (multi-survey / LSST), `tap` (TAP / data access), or `frontends`. A new group value also needs a container in `frontend/index.html` and an entry in the `groups` map in `frontend/app.js` — `test_every_group_is_rendered_by_the_frontend` enforces both. |
 | `url` | URL to probe |
 | `method` | HTTP method (usually `GET`) |
 | `expected_status` | List of acceptable HTTP status codes |

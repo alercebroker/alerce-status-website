@@ -487,3 +487,59 @@ def test_read_prev_status_parses_components():
 
 def test_read_prev_status_none_when_missing():
     assert prober.read_prev_status(_FakeS3()) is None
+
+
+# --- real config.json ↔ frontend wiring ---
+#
+# app.js skips any component whose `group` has no entry in its groups map, and an
+# entry whose container div is missing renders nowhere. Both failures are silent:
+# the component is probed, alerted on and recorded in history, but never appears
+# on the page. These tests tie the shipped config to the shipped frontend.
+
+REPO_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+
+
+def _real_config():
+    with open(os.path.join(os.path.dirname(__file__), "..", "config.json")) as f:
+        return json.load(f)
+
+
+def _frontend(name):
+    with open(os.path.join(REPO_ROOT, "frontend", name)) as f:
+        return f.read()
+
+
+def test_real_config_component_ids_are_unique():
+    """Ids key the history series — a duplicate would silently merge two components."""
+    ids = [c["id"] for c in _real_config()["components"]]
+    assert len(ids) == len(set(ids))
+
+
+def test_every_group_is_rendered_by_the_frontend():
+    groups = {c["group"] for c in _real_config()["components"]}
+    app_js = _frontend("app.js")
+    index_html = _frontend("index.html")
+    for group in groups:
+        assert f"{group}:" in app_js, f"group '{group}' missing from the groups map in app.js"
+        # app.js maps the group id to a container whose id uses dashes (apis_lsst → apis-lsst-rows)
+        container = f'id="{group.replace("_", "-")}-rows"'
+        assert container in index_html, f"group '{group}' has no {container} container in index.html"
+
+
+def test_real_config_thresholds_are_ordered():
+    """degraded < outage <= timeout, per component — otherwise a state is unreachable.
+
+    The timeout must not fire *before* the outage threshold, or the latency-outage
+    branch is dead code and every slow response is recorded as a connection failure
+    (null http_code/response_ms) instead of a timed one. Equality is allowed and
+    means the diagnostics are lost only past the threshold itself
+    (api-ztf-htmx-crossmatch is deliberately at that boundary).
+    """
+    config = _real_config()
+    for comp in config["components"]:
+        degraded, outage, timeout_s = prober._effective_thresholds(comp, config["thresholds"])
+        assert degraded < outage, f"{comp['id']}: degraded threshold must be below outage"
+        assert outage <= timeout_s * 1000, (
+            f"{comp['id']}: timeout ({timeout_s}s) fires before the outage threshold "
+            f"({outage}ms), so a slow response is recorded as a connection failure"
+        )
