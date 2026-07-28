@@ -264,11 +264,74 @@
       "timeout_s": 40
     },
     {
+      "id": "tap-availability",
+      "label": "TAP Service Availability",
+      "group": "tap",
+      "description": "IVOA VOSI availability endpoint of the TAP service — reports whether the DaCHS server itself is up. Answered without touching the database, so it isolates a dead server from a broken query path.",
+      "url": "https://tap.alerce.online/tap/availability",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "tap-adql-ztf",
+      "label": "ADQL Query — ZTF",
+      "group": "tap",
+      "description": "Synchronous ADQL query against the ztf schema (indexed object lookup) — the query path users migrating off direct SQL connections depend on. Exercises the full TAP → database round trip.",
+      "url": "https://tap.alerce.online/tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=csv&QUERY=SELECT+TOP+1+oid,meanra,meandec+FROM+ztf.object+WHERE+oid%3D%27ZTF18aaawjhl%27",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 6000,
+      "latency_outage_ms": 15000,
+      "timeout_s": 20
+    },
+    {
+      "id": "tap-adql-multisurvey",
+      "label": "ADQL Query — Multi-survey",
+      "group": "tap",
+      "description": "Synchronous ADQL query against the alerce_tap schema (indexed object lookup) — the multi-survey catalog served to IVOA clients such as TOPCAT, pyvo and astroquery.",
+      "url": "https://tap.alerce.online/tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=csv&QUERY=SELECT+TOP+1+oid,meanra,meandec+FROM+alerce_tap.object+WHERE+oid%3D170591527609303944",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 6000,
+      "latency_outage_ms": 15000,
+      "timeout_s": 20
+    },
+    {
+      "id": "tap-adql-conesearch",
+      "label": "ADQL Cone Search",
+      "group": "tap",
+      "description": "Positional ADQL query (CONTAINS / CIRCLE) over the ztf schema — the spatial-index path behind cone searches and cross-matches, and the most common query shape in VO tooling.",
+      "url": "https://tap.alerce.online/tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=csv&QUERY=SELECT+TOP+5+oid+FROM+ztf.object+WHERE+CONTAINS(POINT(%27ICRS%27,meanra,meandec),CIRCLE(%27ICRS%27,86.4547530670479,44.65756277176393,0.02))%3D1",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 6000,
+      "latency_outage_ms": 15000,
+      "timeout_s": 20
+    },
+    {
       "id": "frontend-explorer",
       "label": "ALeRCE Explorer",
       "group": "frontends",
       "description": "Web interface for searching, visualizing, and inspecting ALeRCE alert objects.",
       "url": "https://alerce.online",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "frontend-lsst",
+      "label": "LSST Explorer",
+      "group": "frontends",
+      "description": "Multi-survey / LSST web interface — a static site that loads its data from the multi-survey APIs.",
+      "url": "https://lsst.alerce.online",
+      "method": "GET",
+      "expected_status": [200]
+    },
+    {
+      "id": "frontend-snhunter",
+      "label": "SN Hunter",
+      "group": "frontends",
+      "description": "Supernova candidate discovery interface — a static site that loads its data from the ZTF APIs and the stamps service.",
+      "url": "https://snhunter.alerce.online/",
       "method": "GET",
       "expected_status": [200]
     },
