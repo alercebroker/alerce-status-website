@@ -380,12 +380,16 @@ def handler(event, context):
         CacheControl="no-cache",
     )
 
-    update_history(s3, snapshot)
-
-    # Alerting is best-effort and runs last: the data writes above must not depend
-    # on it. maybe_alert swallows its own errors.
+    # Alert before update_history, not after. Alerting is still best-effort --
+    # maybe_alert swallows its own errors, so it cannot block the history write.
+    # But it must not sit *downstream* of it: update_history is by far the most
+    # memory-hungry step, and when it died (OOM) the alert never got sent while
+    # status.json above had already been overwritten. The retry then read that
+    # new state as its baseline, so the transition was silently lost forever.
     if ALERT_TOPIC_ARN:
         maybe_alert(boto3.client("sns"), ALERT_TOPIC_ARN, prev_status, snapshot)
+
+    update_history(s3, snapshot)
 
     return {"statusCode": 200, "overall": snapshot["status"]}
 

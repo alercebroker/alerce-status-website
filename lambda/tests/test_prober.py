@@ -479,6 +479,65 @@ def test_maybe_alert_swallows_publish_failure():
     assert prober.maybe_alert(sns, "arn:topic", {"a": "operational"}, _snap(_c("a", "outage"))) == []
 
 
+# --- handler ordering: alerting must not sit downstream of update_history ---
+
+def _run_handler(monkeypatch, s3, sns, update_history):
+    """Drive handler() with fake AWS clients and a single stubbed probe."""
+    import types
+
+    fake_boto3 = types.SimpleNamespace(
+        client=lambda name: {"s3": s3, "sns": sns}[name]
+    )
+    monkeypatch.setitem(sys.modules, "boto3", fake_boto3)
+    monkeypatch.setattr(prober, "load_config", lambda: {
+        "thresholds": THRESHOLDS,
+        "components": [CONFIG["components"][0]],
+    })
+    monkeypatch.setattr(prober, "probe", lambda comp, th: _make_result(
+        comp["id"], comp["label"], "outage", code=500))
+    monkeypatch.setattr(prober, "update_history", update_history)
+    monkeypatch.setattr(prober, "ALERT_TOPIC_ARN", "arn:topic")
+    return prober.handler({}, None)
+
+
+def test_handler_alerts_even_when_history_write_dies(monkeypatch):
+    """Regression: an OOM in update_history must not swallow the alert.
+
+    status.json is overwritten before update_history runs, so if the alert were
+    sent afterwards a crash there would lose the transition permanently — the
+    retry reads the already-published state as its baseline and sees no change.
+    """
+    s3 = _FakeS3(existing={"components": [{"id": "api-object", "status": "operational"}]})
+    sns = _FakeSNS()
+
+    def boom(_s3, _snapshot):
+        raise MemoryError("simulated Runtime.OutOfMemory")
+
+    # The error must still propagate, so the Lambda Errors metric / alarm fires.
+    try:
+        _run_handler(monkeypatch, s3, sns, boom)
+        raise AssertionError("handler should surface the history-write failure")
+    except MemoryError:
+        pass
+
+    # ...but the operational → outage transition was published first.
+    assert len(sns.published) == 1
+    assert "Object API" in sns.published[0]["Message"]  # alerts carry the label, not the id
+    assert "operational → outage" in sns.published[0]["Message"]
+
+
+def test_handler_writes_history_on_the_happy_path(monkeypatch):
+    """The reorder must not drop the history write when nothing fails."""
+    s3 = _FakeS3(existing={"components": [{"id": "api-object", "status": "operational"}]})
+    sns = _FakeSNS()
+    calls = []
+    result = _run_handler(monkeypatch, s3, sns,
+                          lambda _s3, snap: calls.append(snap))
+    assert len(calls) == 1
+    assert result["statusCode"] == 200
+    assert len(sns.published) == 1
+
+
 def test_read_prev_status_parses_components():
     s3 = _FakeS3(existing={"components": [{"id": "a", "status": "outage"},
                                           {"id": "b", "status": "operational"}]})

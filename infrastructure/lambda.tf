@@ -66,7 +66,13 @@ resource "aws_lambda_function" "prober" {
   # crossmatch ~20 s, object-ranking ~13 s), so a full run can take ~2-3 min.
   # Well under the 5-min schedule, so invocations never overlap.
   timeout          = 240
-  memory_size      = 256
+  # update_history() read-modify-writes the whole of history.json in memory, and
+  # that object grows toward 35 components x 90 days x 288 buckets (~53 MB of raw
+  # JSON). CPython holds each tiny {"ts","status"} entry at ~0.45 KB, so the
+  # decompress/loads/dumps/compress cycle peaks near 430 MB at steady state --
+  # 256 MB OOM'd once ~350 k entries had accumulated. Sized for that ceiling;
+  # revisit (downward) once history.json moves to the compact per-day format.
+  memory_size      = 1024
 
   environment {
     variables = {
