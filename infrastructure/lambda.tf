@@ -66,12 +66,17 @@ resource "aws_lambda_function" "prober" {
   # crossmatch ~20 s, object-ranking ~13 s), so a full run can take ~2-3 min.
   # Well under the 5-min schedule, so invocations never overlap.
   timeout          = 240
-  # update_history() read-modify-writes the whole of history.json in memory, and
-  # that object grows toward 35 components x 90 days x 288 buckets (~53 MB of raw
-  # JSON). CPython holds each tiny {"ts","status"} entry at ~0.45 KB, so the
-  # decompress/loads/dumps/compress cycle peaks near 430 MB at steady state --
-  # 256 MB OOM'd once ~350 k entries had accumulated. Sized for that ceiling;
-  # revisit (downward) once history.json moves to the compact per-day format.
+  # Still 1024 deliberately. This was sized for the OLD per-sample history.json,
+  # whose read-modify-write measured 421.8 MB of peak interpreter memory at steady
+  # state (256 MB OOM'd once ~350 k entries had accumulated). uptime.json's
+  # per-day-string format brings the same cycle down to 4.4 MB, so this is now
+  # ~40x more than needed.
+  #
+  # It is NOT lowered in the same change as the format switch, on purpose: drop it
+  # only after a few days of `Max Memory Used` p99 from the new format, and drop it
+  # to 512 rather than 256 -- Lambda scales vCPU with memory, and the difference
+  # between the two is ~$1.80/month against a function that already spends 50-240 s
+  # per run. See CLAUDE.md ("Uptime history is one fixed-width string...").
   memory_size      = 1024
 
   environment {

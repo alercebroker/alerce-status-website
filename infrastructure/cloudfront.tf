@@ -40,7 +40,7 @@ resource "aws_cloudfront_distribution" "status" {
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
   }
 
-  # Origin 2: data files (status.json, history.json, incidents.json)
+  # Origin 2: data files (status.json, uptime.json, incidents.json)
   origin {
     origin_id                = "data"
     domain_name              = aws_s3_bucket.data.bucket_regional_domain_name

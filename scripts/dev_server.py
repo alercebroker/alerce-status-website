@@ -32,6 +32,16 @@ import prober
 PROBE_INTERVAL = 60
 
 
+class _Body:
+    """Minimal stand-in for a boto3 StreamingBody (the prober calls .read())."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
 class _LocalS3:
     """Fake boto3 S3 client that reads/writes local files under DATA_DIR."""
 
@@ -43,13 +53,17 @@ class _LocalS3:
         path = ROOT / kw["Key"]
         if not path.exists():
             raise self.exceptions.NoSuchKey()
-        return {"Body": path.read_bytes()}
+        # Must be .read()-able: returning bare bytes here raised AttributeError
+        # inside update_history, which the prober then swallowed into an empty
+        # history -- so the dev server silently reset the accumulated series on
+        # every run and could never exercise multi-day rendering.
+        return {"Body": _Body(path.read_bytes())}
 
     def put_object(self, **kw):
         body = kw["Body"]
         if isinstance(body, str):
             body = body.encode()
-        # The prober gzips history.json for S3/CloudFront; the local static
+        # The prober gzips uptime.json for S3/CloudFront; the local static
         # server sends no Content-Encoding, so store it decompressed on disk.
         if kw.get("ContentEncoding") == "gzip":
             body = gzip.decompress(body)
@@ -60,6 +74,11 @@ class _LocalS3:
 
 def run_prober():
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from datetime import datetime, timezone
+
+    # One clock reading for the run, as the Lambda handler does -- keeps the local
+    # path exercising the same code shape as production.
+    now = datetime.now(timezone.utc)
 
     config = prober.load_config()
     results = []
@@ -71,7 +90,7 @@ def run_prober():
         for f in as_completed(futs):
             results.append(f.result())
 
-    snapshot = prober.build_snapshot(results, config)
+    snapshot = prober.build_snapshot(results, config, now=now)
     s3 = _LocalS3()
     s3.put_object(
         Bucket="local",
@@ -79,7 +98,7 @@ def run_prober():
         Body=json.dumps(snapshot, separators=(",", ":")),
         ContentType="application/json",
     )
-    prober.update_history(s3, snapshot)
+    prober.update_history(s3, snapshot, now=now)
     print(f"[prober] {snapshot['updated_at']} — {snapshot['status']}")
 
 

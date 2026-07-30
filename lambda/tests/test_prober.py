@@ -5,6 +5,9 @@ import json
 import sys
 import os
 import time
+from datetime import datetime, timezone
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -297,51 +300,151 @@ def _snapshot_with(statuses):
     }
 
 
-def test_history_creates_entry():
-    s3 = _FakeS3()
-    snap = _snapshot_with({"api-object": "operational"})
-    prober.update_history(s3, snap)
-    assert "api-object" in s3.written
-    assert len(s3.written["api-object"]) == 1
-    assert s3.written["api-object"][0]["status"] == "operational"
+SLOTS = prober.SLOTS_PER_DAY
+T = datetime(2026, 7, 30, 14, 35, tzinfo=timezone.utc)  # slot 175 of 2026-07-30
 
 
-def test_history_no_duplicate_buckets():
+def _row(s3, cid="api-object", day="2026-07-30"):
+    return s3.written[cid][day]
+
+
+def test_history_records_slot_for_the_run():
+    s3 = _FakeS3()
+    prober.update_history(s3, _snapshot_with({"api-object": "operational"}), now=T)
+    row = _row(s3)
+    assert len(row) == SLOTS
+    assert row[175] == "o"
+    # every other slot is explicitly "no check recorded", not a fabricated status
+    assert row.count("o") == 1
+    assert set(row) == {"o", "-"}
+
+
+def test_history_slot_index_tracks_time_of_day():
+    for hh, mm, idx in [(0, 0, 0), (0, 4, 0), (0, 5, 1), (12, 0, 144), (23, 55, 287)]:
+        s3 = _FakeS3()
+        prober.update_history(s3, _snapshot_with({"c": "operational"}),
+                              now=T.replace(hour=hh, minute=mm))
+        assert _row(s3, "c")[idx] == "o", (hh, mm, idx)
+
+
+def test_history_same_slot_rerun_is_idempotent():
+    """A duplicate invocation in one slot must not add a second sample.
+
+    EventBridge -> Lambda is at-least-once, so this is a real sequence, not a
+    hypothetical: with per-day counters it would inflate the day's totals forever.
+    """
     s3 = _FakeS3()
     snap = _snapshot_with({"api-object": "operational"})
-    prober.update_history(s3, snap)
-    # Simulate a second call in the same 5-min window
+    prober.update_history(s3, snap, now=T)
+    first = _row(s3)
     s3._data = s3.written
-    prober.update_history(s3, snap)
-    # Should still be only 1 bucket entry
-    assert len(s3.written["api-object"]) == 1
+    prober.update_history(s3, snap, now=T)
+    assert _row(s3) == first
 
 
-def test_history_no_raw_numerics():
+def test_history_same_slot_status_change_overwrites():
+    s3 = _FakeS3()
+    prober.update_history(s3, _snapshot_with({"api-object": "operational"}), now=T)
+    s3._data = s3.written
+    prober.update_history(s3, _snapshot_with({"api-object": "outage"}), now=T)
+    row = _row(s3)
+    assert row[175] == "x"
+    assert row.count("x") == 1 and row.count("o") == 0
+
+
+def test_history_missed_runs_leave_gaps_not_fabricated_data():
+    """A Lambda outage must be recorded as 'no data', distinguishable from 'up'."""
+    s3 = _FakeS3()
+    snap = _snapshot_with({"api-object": "operational"})
+    prober.update_history(s3, snap, now=T.replace(hour=0, minute=0))
+    s3._data = s3.written
+    prober.update_history(s3, snap, now=T.replace(hour=6, minute=0))  # 6 h gap
+    row = _row(s3)
+    assert row[0] == "o" and row[72] == "o"
+    assert set(row[1:72]) == {"-"}
+    assert row.count("o") == 2
+
+
+def test_history_day_rollover_needs_no_reconciliation():
+    """Crossing midnight just starts a new row; nothing is rolled up or moved."""
+    s3 = _FakeS3()
+    snap = _snapshot_with({"api-object": "operational"})
+    prober.update_history(s3, snap, now=T.replace(hour=23, minute=55))
+    s3._data = s3.written
+    prober.update_history(s3, snap, now=T.replace(day=31, hour=0, minute=0))
+    days = s3.written["api-object"]
+    assert sorted(days) == ["2026-07-30", "2026-07-31"]
+    assert days["2026-07-30"][287] == "o"
+    assert days["2026-07-31"][0] == "o"
+
+
+def test_history_multi_day_outage_leaves_days_absent():
+    """Days with no runs at all get no key -- the frontend renders those 'no data'."""
+    s3 = _FakeS3()
+    snap = _snapshot_with({"api-object": "operational"})
+    prober.update_history(s3, snap, now=T)
+    s3._data = s3.written
+    prober.update_history(s3, snap, now=T.replace(month=8, day=3))  # 4-day gap
+    assert sorted(s3.written["api-object"]) == ["2026-07-30", "2026-08-03"]
+
+
+def test_history_prunes_beyond_retention():
+    s3 = _FakeS3(existing={"api-object": {
+        "2026-01-01": "o" * SLOTS,          # far outside the 90-day window
+        "2026-07-29": "o" * SLOTS,
+    }})
+    prober.update_history(s3, _snapshot_with({"api-object": "operational"}), now=T)
+    assert "2026-01-01" not in s3.written["api-object"]
+    assert "2026-07-29" in s3.written["api-object"]
+
+
+def test_history_prunes_keys_absent_from_the_snapshot():
+    """A renamed/removed component must age out, not persist forever.
+
+    The old implementation only ever pruned ids present in the current snapshot, so
+    four renamed api-lsst-* keys were pinned in the object indefinitely.
+    """
+    s3 = _FakeS3(existing={
+        "api-object": {"2026-07-29": "o" * SLOTS},
+        "renamed-away": {"2026-01-01": "o" * SLOTS},   # only stale days -> key goes
+        "paused-probe": {"2026-07-29": "o" * SLOTS},   # recent days -> key stays
+    })
+    prober.update_history(s3, _snapshot_with({"api-object": "operational"}), now=T)
+    assert "renamed-away" not in s3.written
+    assert s3.written["paused-probe"] == {"2026-07-29": "o" * SLOTS}
+
+
+def test_history_carries_no_probe_metrics():
+    """The public payload must never gain latency/HTTP detail (see CLAUDE.md).
+
+    Structural, not substring-based: per-day counts legitimately contain digits, so
+    the old "'200' not in json" check would have passed while meaning nothing.
+    """
     s3 = _FakeS3()
     snap = _snapshot_with({"api-object": "degraded"})
-    prober.update_history(s3, snap)
-    history_str = json.dumps(s3.written)
-    for forbidden in ["200", "404", "500", "1000", "2000"]:
-        assert forbidden not in history_str
+    snap["components"][0].update(http_code=500, response_ms=2000, probe_url="http://x")
+    prober.update_history(s3, snap, now=T)
+    assert set(s3.written) == {"api-object"}
+    for day, row in s3.written["api-object"].items():
+        assert isinstance(row, str) and set(row) <= set("odx-")
 
 
 def test_history_stored_gzipped_with_cache_ttl():
-    """history.json is written gzipped with Content-Encoding and a 60 s TTL."""
+    """uptime.json is written gzipped with Content-Encoding and a 60 s TTL."""
     s3 = _FakeS3()
-    snap = _snapshot_with({"api-object": "operational"})
-    prober.update_history(s3, snap)
+    prober.update_history(s3, _snapshot_with({"api-object": "operational"}), now=T)
+    assert s3.put_kwargs["Key"] == prober.UPTIME_KEY
     assert s3.put_kwargs["ContentEncoding"] == "gzip"
     assert s3.put_kwargs["CacheControl"] == "max-age=60"
     assert s3.put_kwargs["Body"][:2] == b"\x1f\x8b"  # gzip magic number
 
 
 def test_history_round_trips_gzipped_object():
-    """A previously-gzipped history.json must be decompressed on read-back,
-    not treated as corrupt (which would silently wipe accumulated history)."""
+    """A previously-gzipped object must be decompressed on read-back, not treated
+    as corrupt (which would silently wipe accumulated history)."""
     s3 = _FakeS3()
     snap = _snapshot_with({"api-object": "operational"})
-    prober.update_history(s3, snap)
+    prober.update_history(s3, snap, now=T)
     stored = s3.put_kwargs["Body"]  # gzipped bytes now "in S3"
 
     class _GzS3(_FakeS3):
@@ -349,9 +452,39 @@ def test_history_round_trips_gzipped_object():
             return {"Body": _FakeBody(stored)}
 
     s3b = _GzS3()
-    prober.update_history(s3b, snap)
-    assert "api-object" in s3b.written
-    assert len(s3b.written["api-object"]) == 1
+    prober.update_history(s3b, snap, now=T.replace(minute=40))
+    row = _row(s3b)
+    assert row[175] == "o" and row[176] == "o"
+
+
+def test_history_read_failure_raises_instead_of_wiping():
+    """An unreadable object must NOT be silently republished as empty.
+
+    Losing 30 days of bars leaves no trace and cannot be undone; raising is
+    recoverable -- status.json is already written, the alert already sent, and the
+    prober-errors alarm pages.
+    """
+    class _CorruptS3(_FakeS3):
+        def get_object(self, **kw):
+            return {"Body": _FakeBody(b"{not json")}
+
+    s3 = _CorruptS3()
+    with pytest.raises(Exception):
+        prober.update_history(s3, _snapshot_with({"api-object": "operational"}), now=T)
+    assert s3.written is None  # nothing was published
+
+
+def test_history_row_width_defines_granularity():
+    """A day already stored at another granularity keeps its own width.
+
+    The row length is what tells the frontend how much time each character covers,
+    so changing BUCKET_MINUTES must not corrupt days recorded under the old value.
+    """
+    s3 = _FakeS3(existing={"api-object": {"2026-07-30": "-" * 144}})  # 10-min slots
+    prober.update_history(s3, _snapshot_with({"api-object": "operational"}), now=T)
+    row = _row(s3)
+    assert len(row) == 144
+    assert row[87] == "o"  # (14*60+35) * 144 // 1440
 
 
 # --- state-change alerting ---
@@ -510,7 +643,7 @@ def test_handler_alerts_even_when_history_write_dies(monkeypatch):
     s3 = _FakeS3(existing={"components": [{"id": "api-object", "status": "operational"}]})
     sns = _FakeSNS()
 
-    def boom(_s3, _snapshot):
+    def boom(_s3, _snapshot, now=None):
         raise MemoryError("simulated Runtime.OutOfMemory")
 
     # The error must still propagate, so the Lambda Errors metric / alarm fires.
@@ -532,10 +665,15 @@ def test_handler_writes_history_on_the_happy_path(monkeypatch):
     sns = _FakeSNS()
     calls = []
     result = _run_handler(monkeypatch, s3, sns,
-                          lambda _s3, snap: calls.append(snap))
+                          lambda _s3, snap, now=None: calls.append((snap, now)))
     assert len(calls) == 1
     assert result["statusCode"] == 200
     assert len(sns.published) == 1
+    # One clock reading for the whole run: the snapshot and the history slot must
+    # come from the same instant, or they can straddle midnight.
+    snap, now = calls[0]
+    assert now is not None
+    assert snap["updated_at"] == now.isoformat(timespec="seconds")
 
 
 def test_read_prev_status_parses_components():

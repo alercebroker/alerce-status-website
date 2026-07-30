@@ -24,6 +24,11 @@ BUCKET_MINUTES = 5
 SAMPLES_PER_DAY = 24 * 60 // BUCKET_MINUTES   # 288
 WINDOW_DAYS = 30                              # today + 29 prior days (frontend shows 30)
 
+# Must match prober.STATUS_CHARS / NO_DATA_CHAR.
+STATUS_CHARS = {"operational": "o", "degraded": "d", "outage": "x"}
+NO_DATA_CHAR = "-"
+CHAR_STATUS = {v: k for k, v in STATUS_CHARS.items()}
+
 # Match prober._group_label / _overall_label so the demo renders like production.
 GROUP_LABEL = {"operational": "Operational",
                "degraded": "Degraded performance",
@@ -91,13 +96,18 @@ def _noise(cid, d, count, rng):
     return []
 
 
-def _day(day_start, count, cid, d, rng):
+def _day(count, cid, d, rng):
+    """One day as a SAMPLES_PER_DAY-char row: recorded slots then '-' for the rest.
+
+    Matches the prober's uptime format (see prober.update_history) -- one character
+    per 5-min slot, position implying time of day.
+    """
     st = ["operational"] * count
     for start, length, status in _spans(cid, d, count) + _noise(cid, d, count, rng):
         for i in range(start, min(start + length, count)):
             st[i] = status
-    return [{"ts": _iso(day_start + dt.timedelta(minutes=i * BUCKET_MINUTES)), "status": st[i]}
-            for i in range(count)]
+    row = "".join(STATUS_CHARS[s] for s in st)
+    return row + NO_DATA_CHAR * (SAMPLES_PER_DAY - count)
 
 
 def _reanchor_incidents(now):
@@ -137,17 +147,19 @@ def build(now):
 
     rng = Random(20260722)  # fixed seed -> stable bars across runs (nice for screenshots)
     history = {}
+    today_key = midnight.date().isoformat()
     for cid in comp_ids:
-        buckets = []
+        days = {}
         for d in range(WINDOW_DAYS - 1, -1, -1):        # oldest -> today
-            day_start = midnight - dt.timedelta(days=d)
+            day = (midnight - dt.timedelta(days=d)).date().isoformat()
             count = today_count if d == 0 else SAMPLES_PER_DAY
-            buckets.extend(_day(day_start, count, cid, d, rng))
-        history[cid] = buckets
+            days[day] = _day(count, cid, d, rng)
+        history[cid] = days
 
     now_iso = _iso(now)
     for c in template["components"]:
-        cur = history[c["id"]][-1]["status"]            # current status = today's latest sample
+        # current status = today's latest recorded slot
+        cur = CHAR_STATUS[history[c["id"]][today_key][today_count - 1]]
         c["status"] = cur
         c["status_label"] = GROUP_LABEL[cur]
         c["checked_at"] = now_iso
@@ -175,15 +187,16 @@ def write_demo(data_dir, now=None):
     status, history, incidents = build(now)
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     _write(data_dir, "status.json", status)
-    _write(data_dir, "history.json", history)
+    _write(data_dir, "uptime.json", history)
     _write(data_dir, "incidents.json", incidents)
     return status
 
 
 def tick(data_dir, now=None):
     """Keep DEMO data fresh between full rebuilds: refresh updated_at each call and
-    append/replace today's current 5-min bucket per component (idempotent, like the
-    real prober) so the page never trips the stale-data warning during a session."""
+    write today's current slot per component (positional, so it's idempotent like
+    the real prober) so the page never trips the stale-data warning during a
+    session."""
     now = (now or dt.datetime.now(dt.timezone.utc)).replace(microsecond=0)
     data_dir = Path(data_dir)
     status = json.loads((data_dir / "status.json").read_text())
@@ -193,16 +206,12 @@ def tick(data_dir, now=None):
         c["checked_at"] = now_iso
     _write(data_dir, "status.json", status)
 
-    bucket_ts = _iso(_floor_bucket(now))
-    history = json.loads((data_dir / "history.json").read_text())
-    changed = False
+    day = now.date().isoformat()
+    idx = (now.hour * 60 + now.minute) // BUCKET_MINUTES
+    history = json.loads((data_dir / "uptime.json").read_text())
     for c in status["components"]:
-        buckets = history.get(c["id"], [])
-        if buckets and buckets[-1]["ts"] == bucket_ts:
-            continue
-        buckets = [b for b in buckets if b["ts"] != bucket_ts]
-        buckets.append({"ts": bucket_ts, "status": c["status"]})
-        history[c["id"]] = buckets
-        changed = True
-    if changed:
-        _write(data_dir, "history.json", history)
+        days = history.setdefault(c["id"], {})
+        row = days.get(day) or NO_DATA_CHAR * SAMPLES_PER_DAY
+        char = STATUS_CHARS.get(c["status"], NO_DATA_CHAR)
+        days[day] = row[:idx] + char + row[idx + 1:]
+    _write(data_dir, "uptime.json", history)

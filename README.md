@@ -4,7 +4,7 @@ Public status page for the ALeRCE astronomical broker, deployed at `status.alerc
 
 ## Architecture (Stage 1)
 
-- **Lambda** (`lambda/prober.py`) — runs every 5 minutes via EventBridge, HTTP-probes all public endpoints **sequentially** (to avoid bursting shared backends), writes `status.json` + `history.json` to S3.
+- **Lambda** (`lambda/prober.py`) — runs every 5 minutes via EventBridge, HTTP-probes all public endpoints **sequentially** (to avoid bursting shared backends), writes `status.json` + `uptime.json` to S3.
 - **S3 + CloudFront** — static frontend served at `status.alerce.online`; data files served under `/data/*`.
 - **Incidents** — `incidents/incidents.json` in this repo; CI uploads it to S3 on every push to `main`.
 
