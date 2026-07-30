@@ -32,6 +32,16 @@ import prober
 PROBE_INTERVAL = 60
 
 
+class _Body:
+    """Minimal stand-in for a boto3 StreamingBody (the prober calls .read())."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
 class _LocalS3:
     """Fake boto3 S3 client that reads/writes local files under DATA_DIR."""
 
@@ -43,7 +53,11 @@ class _LocalS3:
         path = ROOT / kw["Key"]
         if not path.exists():
             raise self.exceptions.NoSuchKey()
-        return {"Body": path.read_bytes()}
+        # Must be .read()-able: returning bare bytes here raised AttributeError
+        # inside update_history, which the prober then swallowed into an empty
+        # history -- so the dev server silently reset the accumulated series on
+        # every run and could never exercise multi-day rendering.
+        return {"Body": _Body(path.read_bytes())}
 
     def put_object(self, **kw):
         body = kw["Body"]
