@@ -63,7 +63,7 @@ class _LocalS3:
         body = kw["Body"]
         if isinstance(body, str):
             body = body.encode()
-        # The prober gzips history.json for S3/CloudFront; the local static
+        # The prober gzips uptime.json for S3/CloudFront; the local static
         # server sends no Content-Encoding, so store it decompressed on disk.
         if kw.get("ContentEncoding") == "gzip":
             body = gzip.decompress(body)
@@ -74,6 +74,11 @@ class _LocalS3:
 
 def run_prober():
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from datetime import datetime, timezone
+
+    # One clock reading for the run, as the Lambda handler does -- keeps the local
+    # path exercising the same code shape as production.
+    now = datetime.now(timezone.utc)
 
     config = prober.load_config()
     results = []
@@ -85,7 +90,7 @@ def run_prober():
         for f in as_completed(futs):
             results.append(f.result())
 
-    snapshot = prober.build_snapshot(results, config)
+    snapshot = prober.build_snapshot(results, config, now=now)
     s3 = _LocalS3()
     s3.put_object(
         Bucket="local",
@@ -93,7 +98,7 @@ def run_prober():
         Body=json.dumps(snapshot, separators=(",", ":")),
         ContentType="application/json",
     )
-    prober.update_history(s3, snapshot)
+    prober.update_history(s3, snapshot, now=now)
     print(f"[prober] {snapshot['updated_at']} — {snapshot['status']}")
 
 

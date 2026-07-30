@@ -11,7 +11,7 @@ resource "aws_s3_bucket_public_access_block" "site" {
   restrict_public_buckets = true
 }
 
-# Data bucket — holds status.json, history.json, incidents.json
+# Data bucket — holds status.json, uptime.json, incidents.json
 resource "aws_s3_bucket" "data" {
   bucket = "${local.name_prefix}-data"
 }

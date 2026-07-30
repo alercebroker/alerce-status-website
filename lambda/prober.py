@@ -1,6 +1,6 @@
 """
 Lambda handler: probes public ALeRCE endpoints, maps results to
-operational/degraded/outage, and writes status.json + history.json to S3.
+operational/degraded/outage, and writes status.json + uptime.json to S3.
 
 Non-operational components include probe_url, http_code, and response_ms
 for diagnostic display. Operational components omit these fields.
@@ -26,6 +26,16 @@ HISTORY_DAYS = 90
 BUCKET_MINUTES = 5  # roll up checks into 5-min windows for the history graph
 DEFAULT_TIMEOUT_S = 15  # per-endpoint override via component["timeout_s"]
 STATUS_PAGE_URL = "https://status.alerce.online"
+
+# Uptime history: one fixed-width string per component per UTC day, one character
+# per BUCKET_MINUTES slot (see update_history). Published under its own key --
+# NOT the legacy data/history.json, whose per-sample array shape an already-open
+# browser tab would choke on (see docs in update_history).
+UPTIME_KEY = "data/uptime.json"
+MINUTES_PER_DAY = 24 * 60
+SLOTS_PER_DAY = MINUTES_PER_DAY // BUCKET_MINUTES  # 288
+STATUS_CHARS = {"operational": "o", "degraded": "d", "outage": "x"}
+NO_DATA_CHAR = "-"
 
 # Severity ranking for state-change detection. We alert when a component gets
 # WORSE (rank increases above operational, incl. degraded→outage escalation) and
@@ -129,9 +139,14 @@ def _group_label(status):
     }[status]
 
 
-def build_snapshot(probe_results, config):
-    """Build the status.json dict from probe results."""
-    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+def build_snapshot(probe_results, config, now=None):
+    """Build the status.json dict from probe results.
+
+    `now` is injectable so the caller can stamp the snapshot and the history slot
+    from a single clock reading — two independent datetime.now() calls minutes
+    apart can land on opposite sides of midnight.
+    """
+    now_iso = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
 
     by_id = {r["id"]: r for r in probe_results}
 
@@ -173,58 +188,110 @@ def build_snapshot(probe_results, config):
     }
 
 
-def update_history(s3, snapshot):
-    """
-    Read existing history.json, append a bucket for this run,
-    prune to 90 days, write back (gzipped, with a 60 s cache TTL).
+def _slot_index(now, slots_per_day):
+    """Which slot of the UTC day `now` falls in, for a row of `slots_per_day` chars.
 
-    History format:
-    {
-      "component_id": [
-        {"ts": "ISO", "status": "operational"},
-        ...
-      ]
-    }
+    Derived from the row's own width rather than BUCKET_MINUTES, so days already
+    recorded at one granularity keep rendering correctly if BUCKET_MINUTES changes.
+    """
+    return (now.hour * 60 + now.minute) * slots_per_day // MINUTES_PER_DAY
+
+
+def _read_uptime(s3):
+    """Return the stored uptime object, or {} on first-ever run.
+
+    Deliberately does NOT swallow read/parse errors into an empty dict: doing that
+    would republish an empty history and blank every uptime bar on the site with no
+    trace. Failing loudly is recoverable -- status.json is already written and the
+    alert already sent by the time we get here (see handler), and the prober-errors
+    alarm pages. A silent wipe is not recoverable.
     """
     try:
-        obj = s3.get_object(Bucket=BUCKET, Key="data/history.json")
+        obj = s3.get_object(Bucket=BUCKET, Key=UPTIME_KEY)
+    except s3.exceptions.NoSuchKey:
+        return {}
+    try:
         raw = obj["Body"].read()
         if raw[:2] == b"\x1f\x8b":  # gzip magic number — object is stored gzipped
             raw = gzip.decompress(raw)
-        history = json.loads(raw)
-    except s3.exceptions.NoSuchKey:
-        history = {}
-    except Exception:
-        history = {}
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError(f"uptime object is {type(data).__name__}, expected dict")
+        return data
+    except Exception as e:
+        print(json.dumps({"metric": "uptime_read_error", "error": repr(e)}))
+        raise
 
-    now = datetime.now(timezone.utc)
-    # Bucket key: round down to nearest BUCKET_MINUTES window
-    bucket_ts = now.replace(
-        minute=(now.minute // BUCKET_MINUTES) * BUCKET_MINUTES,
-        second=0,
-        microsecond=0,
-    ).isoformat(timespec="seconds")
 
-    cutoff = (now - timedelta(days=HISTORY_DAYS)).isoformat(timespec="seconds")
+def update_history(s3, snapshot, now=None):
+    """
+    Record this run's statuses into the uptime object and write it back (gzipped,
+    with a 60 s cache TTL).
 
+    Format -- one fixed-width string per component per UTC day, one character per
+    BUCKET_MINUTES slot, position implying time-of-day (slot 0 = 00:00):
+
+    {
+      "component_id": {
+        "2026-07-30": "ooooodddddoooo...----"   # o operational, d degraded,
+        ...                                     # x outage, - no check recorded
+      }
+    }
+
+    Two properties this shape buys, both load-bearing:
+
+    1. Writing is *positional* (`row[:i] + char + row[i+1:]`), so it is idempotent
+       by construction. A duplicate invocation in the same slot -- which EventBridge
+       can genuinely cause, since it guarantees at-least-once delivery -- rewrites
+       the same character and changes nothing. Per-day counters would increment
+       twice and skew that day's uptime permanently, with no way to detect it.
+    2. There is no day-rollover step to get wrong. The day key and the slot index
+       both fall out of one timestamp, so they cannot disagree, and a Lambda outage
+       of any length just leaves '-' slots behind instead of needing to be
+       reconciled later.
+
+    Storing per-day strings rather than per-sample records is what keeps this
+    affordable: the frontend only ever renders per-day counts (see aggregateDaily),
+    so the ~900k {"ts","status"} dicts the old format accumulated -- ~50 MB of JSON
+    and ~430 MB of interpreter memory at steady state -- reduce to ~1 MB and ~15 MB
+    with nothing the UI draws being lost.
+    """
+    now = now or datetime.now(timezone.utc)
+    history = _read_uptime(s3)
+
+    day = now.date().isoformat()
     for comp in snapshot["components"]:
-        cid = comp["id"]
-        buckets = history.get(cid, [])
-        # Remove any existing entry for this time bucket (idempotent re-runs)
-        buckets = [b for b in buckets if b["ts"] != bucket_ts]
-        buckets.append({"ts": bucket_ts, "status": comp["status"]})
-        # Prune old entries
-        buckets = [b for b in buckets if b["ts"] >= cutoff]
-        history[cid] = sorted(buckets, key=lambda b: b["ts"])
+        days = history.setdefault(comp["id"], {})
+        if not isinstance(days, dict):
+            days = history[comp["id"]] = {}
+        row = days.get(day)
+        # Rebuild the row unless it is a usable width (a whole number of slots).
+        if not isinstance(row, str) or not row or MINUTES_PER_DAY % len(row):
+            row = NO_DATA_CHAR * SLOTS_PER_DAY
+        idx = _slot_index(now, len(row))
+        char = STATUS_CHARS.get(comp["status"], NO_DATA_CHAR)
+        days[day] = row[:idx] + char + row[idx + 1:]
 
-    # Store gzipped: this payload is highly repetitive (~5% of raw size) and
-    # exceeds CloudFront's 10 MB auto-compression limit, so we compress at the
-    # origin. Browsers decompress transparently via Content-Encoding. The read
-    # above detects the gzip magic number, so re-runs round-trip correctly.
+    # Prune across EVERY key, not just this run's components: a renamed or removed
+    # component would otherwise keep its rows forever, since nothing else ever
+    # touches its entry. Iterating all keys also gives the intended behaviour for a
+    # probe temporarily pulled from config -- it keeps HISTORY_DAYS of history, then
+    # ages out on its own.
+    cutoff = (now - timedelta(days=HISTORY_DAYS)).date().isoformat()
+    for cid in list(history):
+        days = {d: row for d, row in history[cid].items() if d >= cutoff}
+        if days:
+            history[cid] = days
+        else:
+            del history[cid]
+
+    # Store gzipped: the payload is highly repetitive, so this is a large win even
+    # at the new size. Browsers decompress transparently via Content-Encoding, and
+    # the read above detects the gzip magic number so re-runs round-trip correctly.
     body = json.dumps(history, separators=(",", ":")).encode("utf-8")
     s3.put_object(
         Bucket=BUCKET,
-        Key="data/history.json",
+        Key=UPTIME_KEY,
         Body=gzip.compress(body, mtime=0),
         ContentType="application/json",
         ContentEncoding="gzip",
@@ -350,6 +417,14 @@ def handler(event, context):
     config = load_config()
     thresholds = config["thresholds"]
 
+    # One clock reading for the whole run, taken BEFORE probing. Two reasons:
+    # the history slot then reflects when the checks actually ran rather than when
+    # the write finished (the run takes ~50 s, up to the 240 s timeout), which keeps
+    # consecutive runs landing in consecutive slots instead of drifting by however
+    # long the probes took; and status.json's updated_at cannot end up on the other
+    # side of midnight from the slot it is recorded in.
+    now = datetime.now(timezone.utc)
+
     # Probe endpoints sequentially: many queries fan out to different EKS pods
     # but funnel into the same pgbouncer/Postgres, so we avoid bursting the
     # shared connection pool with simultaneous DB-backed requests.
@@ -363,7 +438,7 @@ def handler(event, context):
             results.append(future.result())
 
     log_response_times(results)  # private latency log → CloudWatch
-    snapshot = build_snapshot(results, config)
+    snapshot = build_snapshot(results, config, now=now)
 
     import boto3
     s3 = boto3.client("s3")
@@ -389,7 +464,7 @@ def handler(event, context):
     if ALERT_TOPIC_ARN:
         maybe_alert(boto3.client("sns"), ALERT_TOPIC_ARN, prev_status, snapshot)
 
-    update_history(s3, snapshot)
+    update_history(s3, snapshot, now=now)
 
     return {"statusCode": 200, "overall": snapshot["status"]}
 

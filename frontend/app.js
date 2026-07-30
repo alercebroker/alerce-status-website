@@ -4,9 +4,8 @@ const DATA_BASE = "/data";  // CloudFront serves /data/* from the data S3 bucket
 const POLL_STATUS_MS  = 30_000;
 const POLL_HISTORY_MS = 60_000;
 const POLL_INCIDENTS_MS = 60_000;
-const HISTORY_BUCKETS = 90 * 24 * 60 / 5; // 90 days of 5-min buckets (max)
 const DISPLAY_DAYS = 30;       // each bar = one day
-const BUCKET_MINUTES = 5;      // must match the prober's history bucketing (one status sample per window)
+const BUCKET_MINUTES = 5;      // fallback only; the real width is read off each day's row length
 // Threshold coloring: a day is colored by the *fraction* of its samples in each
 // state, not by the single worst sample — so one transient failed check no longer
 // paints a whole day red. Exact per-day downtime/degraded time lives in the tooltip.
@@ -93,10 +92,19 @@ function renderComponents(snapshot) {
   }
 }
 
-// Aggregate raw 5-min buckets into DISPLAY_DAYS daily slots, oldest first.
+// Build DISPLAY_DAYS daily slots, oldest first, from the prober's uptime series.
 // Each slot keeps the per-state sample counts for its UTC day so we can report
 // the *fraction* of the day spent operational/degraded/down (and derive a
 // threshold color) instead of collapsing the day to its single worst sample.
+//
+// The wire format is one fixed-width string per day, one character per check slot
+// ("o" operational, "d" degraded, "x" outage, "-" no check recorded), so counting
+// is just tallying characters. The slot width is derived from the row's own length
+// rather than assumed, which keeps days recorded at one granularity rendering
+// correctly if the prober's bucket size ever changes.
+const CHAR_STATUS = { o: "operational", d: "degraded", x: "outage" };
+const KNOWN_STATUS = new Set(Object.values(CHAR_STATUS));
+
 function aggregateDaily(componentId) {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -105,15 +113,29 @@ function aggregateDaily(componentId) {
   for (let i = DISPLAY_DAYS - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
-    slots.push({ date: d.toISOString().slice(0, 10), operational: 0, degraded: 0, outage: 0 });
+    slots.push({ date: d.toISOString().slice(0, 10), operational: 0, degraded: 0,
+                 outage: 0, bucketMinutes: BUCKET_MINUTES });
   }
   const indexByDate = Object.fromEntries(slots.map((s, i) => [s.date, i]));
+  const series = history[componentId];
 
-  for (const b of history[componentId] || []) {
-    const day = (b.ts || "").slice(0, 10);
-    const idx = indexByDate[day];
-    if (idx === undefined) continue;
-    if (b.status === "operational" || b.status === "degraded" || b.status === "outage") slots[idx][b.status] += 1;
+  if (Array.isArray(series)) {
+    // Legacy per-sample format ([{ts, status}, ...]). Kept so a stale cached copy
+    // of the old data file still renders instead of throwing mid-render.
+    for (const b of series) {
+      const idx = indexByDate[(b.ts || "").slice(0, 10)];
+      if (idx !== undefined && KNOWN_STATUS.has(b.status)) slots[idx][b.status] += 1;
+    }
+  } else if (series && typeof series === "object") {
+    for (const [day, row] of Object.entries(series)) {
+      const idx = indexByDate[day];
+      if (idx === undefined || typeof row !== "string" || !row.length) continue;
+      slots[idx].bucketMinutes = (24 * 60) / row.length;
+      for (const ch of row) {
+        const status = CHAR_STATUS[ch];
+        if (status) slots[idx][status] += 1;
+      }
+    }
   }
   return slots.map(dayStats);
 }
@@ -152,8 +174,8 @@ function dayTooltip(d) {
   const date = fmtDay(d.date);
   if (d.total === 0) return `${date} · no data`;
   const parts = [`${fmtPct(d.upFrac)} up`];
-  if (d.outage)   parts.push(`${fmtMins(d.outage)} down`);
-  if (d.degraded) parts.push(`${fmtMins(d.degraded)} degraded`);
+  if (d.outage)   parts.push(`${fmtMins(d.outage, d.bucketMinutes)} down`);
+  if (d.degraded) parts.push(`${fmtMins(d.degraded, d.bucketMinutes)} degraded`);
   const failed = [];
   if (d.outage)   failed.push(`${d.outage} down`);
   if (d.degraded) failed.push(`${d.degraded} degraded`);
@@ -285,9 +307,9 @@ async function refreshStatus() {
 
 async function refreshHistory() {
   try {
-    history = await fetchJSON(DATA_BASE + "/history.json", { bustCache: false });
+    history = await fetchJSON(DATA_BASE + "/uptime.json", { bustCache: false });
   } catch (e) {
-    console.error("Failed to fetch history.json", e);
+    console.error("Failed to fetch uptime.json", e);
   }
 }
 
@@ -324,9 +346,9 @@ function fmtDay(dateStr) {
   });
 }
 
-// Sample count -> human duration (each sample covers BUCKET_MINUTES).
-function fmtMins(samples) {
-  const mins = samples * BUCKET_MINUTES;
+// Sample count -> human duration (each sample covers `perSample` minutes).
+function fmtMins(samples, perSample = BUCKET_MINUTES) {
+  const mins = samples * perSample;
   if (mins < 60) return `${mins} min`;
   const h = Math.floor(mins / 60), m = mins % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
