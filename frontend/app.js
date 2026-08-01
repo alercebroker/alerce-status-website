@@ -43,6 +43,7 @@ function renderComponents(snapshot) {
   const groups = { apis: {label: "ZTF APIs", el: document.getElementById("apis-rows")},
                    apis_lsst: {label: "Multi-survey (LSST) APIs", el: document.getElementById("apis-lsst-rows")},
                    tap: {label: "Data Access (TAP)", el: document.getElementById("tap-rows")},
+                   apis_other: {label: "Other APIs", el: document.getElementById("apis-other-rows")},
                    frontends: {label: "Frontends & Docs", el: document.getElementById("frontends-rows")} };
 
   for (const g of Object.values(groups)) {
