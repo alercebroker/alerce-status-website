@@ -309,6 +309,15 @@
       "timeout_s": 20
     },
     {
+      "id": "users-api-current",
+      "label": "Users API — Current User",
+      "group": "apis_other",
+      "description": "Authentication and user-profile backend behind SN Hunter, watchlists and reports. Probed unauthenticated: a 401 from the real /users/current/ route is proof the service is serving, since every data endpoint requires a token.",
+      "url": "https://users.alerce.online/users/current/",
+      "method": "GET",
+      "expected_status": [401]
+    },
+    {
       "id": "frontend-explorer",
       "label": "ALeRCE Explorer",
       "group": "frontends",
