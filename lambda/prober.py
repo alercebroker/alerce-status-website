@@ -55,9 +55,9 @@ def _effective_thresholds(component, thresholds):
 
     A component may override any of `latency_degraded_ms`, `latency_outage_ms`
     or `timeout_s` inline; anything not set falls back to the global defaults.
-    This lets legitimately slow endpoints (the all-catalog crossmatch ~20 s, the
-    object-ranking query ~13 s) carry their own calibrated limits instead of
-    being flagged by the fast-endpoint defaults.
+    This lets legitimately slow endpoints (the unfiltered LSST object list ~10 s,
+    the ZTF object-page light curve ~3.3 s) carry their own calibrated limits
+    instead of being flagged by the fast-endpoint defaults.
     """
     return (
         component.get("latency_degraded_ms", thresholds["latency_degraded_ms"]),
