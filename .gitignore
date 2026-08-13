@@ -17,6 +17,7 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+*.code-workspace
 
 # Local env
 .env

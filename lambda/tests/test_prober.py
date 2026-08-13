@@ -740,3 +740,40 @@ def test_real_config_thresholds_are_ordered():
             f"{comp['id']}: timeout ({timeout_s}s) fires before the outage threshold "
             f"({outage}ms), so a slow response is recorded as a connection failure"
         )
+
+
+def _terraform_lambda_timeout_s():
+    """The `timeout` of the prober Lambda, read from the Terraform that deploys it."""
+    with open(os.path.join(REPO_ROOT, "infrastructure", "lambda.tf")) as f:
+        for line in f:
+            key, _, value = line.partition("=")
+            if key.strip() == "timeout":
+                return int(value.strip())
+    raise AssertionError("no `timeout` found in infrastructure/lambda.tf")
+
+
+def test_real_config_timeout_budget_fits_the_lambda_timeout():
+    """Sum of every per-probe timeout must fit inside the Lambda's own timeout.
+
+    Probes run sequentially (max_workers=1), so in the worst case — every endpoint
+    hanging until its socket timeout — a run costs the *sum* of the per-component
+    timeouts. If that sum exceeds the Lambda timeout, the run is killed mid-probe
+    and writes nothing at all: no status.json, no uptime slot, and no probe_latency
+    lines (log_response_times only runs after every probe returns). The status page
+    then goes stale precisely during the outage it exists to report.
+
+    This is not hypothetical: with the pre-calibration config the budget was 575 s
+    against a 240 s timeout, and 72 of 2073 runs over the week of 06-13/08/2026 were
+    killed at 240 s.
+    """
+    config = _real_config()
+    budget = sum(
+        prober._effective_thresholds(comp, config["thresholds"])[2]
+        for comp in config["components"]
+    )
+    lambda_timeout = _terraform_lambda_timeout_s()
+    assert budget <= lambda_timeout, (
+        f"worst-case probe budget is {budget}s but the Lambda times out at "
+        f"{lambda_timeout}s — a broad outage would kill the run and record nothing. "
+        f"Lower some timeout_s values or raise the Lambda timeout."
+    )

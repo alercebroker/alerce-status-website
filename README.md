@@ -108,11 +108,13 @@ Edit `lambda/config.json`. Fields per component:
 | `timeout_s` | *(optional)* per-endpoint request timeout override |
 
 Global defaults (`thresholds` key), used when a component doesn't override them:
-- `latency_degraded_ms` — response slower than this → degraded (default 4000 ms)
-- `latency_outage_ms` — response slower than this → outage (default 10000 ms)
-- `timeout_s` — request timeout (default 15 s)
+- `latency_degraded_ms` — response slower than this → degraded (default 3000 ms)
+- `latency_outage_ms` — response slower than this → outage (default 4000 ms)
+- `timeout_s` — request timeout (default 5 s)
 
-Slow-by-design endpoints (e.g. the all-catalog crossmatch ~20 s, the object-ranking query ~13 s) set their own higher `latency_*`/`timeout_s` so the tight fast-endpoint defaults don't flag them. `python lambda/prober.py` prints a slowest-first latency table to help calibrate these.
+Slow-by-design endpoints (the unfiltered LSST object list is the main one, at ~7 s median) set their own higher `latency_*`/`timeout_s` so the tight fast-endpoint defaults don't flag them.
+
+Because probes run one at a time, the per-endpoint `timeout_s` values must **sum** to less than the Lambda's own timeout — otherwise a broad outage kills the run before it can publish anything. A test enforces this, so adding a probe or raising a timeout may require lowering another. Calibrate from the Lambda's own `metric=probe_latency` CloudWatch logs; `python lambda/prober.py` prints a slowest-first latency table, but it probes from your machine rather than from AWS, so its absolute numbers run high.
 
 ## Posting an incident or maintenance note
 
