@@ -17,9 +17,14 @@ Usage:
   python scripts/incident.py update 2026-05-15-api-degraded \\
       --message "Rolled back the bad deploy; monitoring."
 
-  # Close it (auto-sets resolved_at)
+  # Close it (resolved_at defaults to now)
   python scripts/incident.py update 2026-05-15-api-degraded \\
       --status resolved \\
+      --message "Resolved after rolling restart."
+
+  # Close it with the real recovery time, when posting after the fact
+  python scripts/incident.py update 2026-05-15-api-degraded \\
+      --status resolved --resolved 2026-05-15T22:00:00Z \\
       --message "Resolved after rolling restart."
 
   # Schedule maintenance for a future window
@@ -61,6 +66,12 @@ def parse_ts(s):
     return s
 
 
+def check_order(started, resolved):
+    """A backdated resolved_at that precedes started_at would render a negative outage."""
+    if datetime.fromisoformat(resolved[:-1]) < datetime.fromisoformat(started[:-1]):
+        sys.exit(f"--resolved {resolved} is before started_at {started}")
+
+
 def load():
     with INCIDENTS_FILE.open() as f:
         return json.load(f)
@@ -87,6 +98,9 @@ def cmd_open(args):
     status = args.status or ("scheduled" if type_ == "maintenance" else "investigating")
     if status not in STATUSES[type_]:
         sys.exit(f"invalid status for {type_}: {status!r} (allowed: {STATUSES[type_]})")
+    resolved = parse_ts(args.resolved) if args.resolved else None
+    if resolved and status not in TERMINAL:
+        sys.exit(f"--resolved needs a terminal status ({'/'.join(sorted(TERMINAL))}), got {status!r}")
     started = parse_ts(args.start) if args.start else now_utc()
     entry = {"id": args.id, "title": args.title, "status": status, "started_at": started}
     if type_ != "incident":
@@ -100,26 +114,35 @@ def cmd_open(args):
     if args.message:
         entry["updates"] = [{"at": now_utc(), "message": args.message}]
     if status in TERMINAL:
-        entry["resolved_at"] = now_utc()
+        if resolved:
+            check_order(started, resolved)
+        entry["resolved_at"] = resolved or now_utc()
     entries.append(entry)
     save(entries)
     print(f"opened {args.id} ({type_}, {status})")
 
 
 def cmd_update(args):
-    if not args.message and not args.status:
-        sys.exit("nothing to do: pass --message and/or --status")
+    if not args.message and not args.status and not args.resolved:
+        sys.exit("nothing to do: pass --message, --status and/or --resolved")
     entries = load()
     entry = find(entries, args.id)
     if not entry:
         sys.exit(f"incident not found: {args.id}")
     type_ = entry.get("type", "incident")
+    resolved = parse_ts(args.resolved) if args.resolved else None
     if args.status:
         if args.status not in STATUSES[type_]:
             sys.exit(f"invalid status for {type_}: {args.status!r} (allowed: {STATUSES[type_]})")
         entry["status"] = args.status
-        if args.status in TERMINAL and "resolved_at" not in entry:
-            entry["resolved_at"] = now_utc()
+    if resolved:
+        # Also corrects a resolved_at an earlier close stamped with the wrong time.
+        if entry["status"] not in TERMINAL:
+            sys.exit(f"--resolved needs a terminal status ({'/'.join(sorted(TERMINAL))}), got {entry['status']!r}")
+        check_order(entry["started_at"], resolved)
+        entry["resolved_at"] = resolved
+    elif args.status in TERMINAL and "resolved_at" not in entry:
+        entry["resolved_at"] = now_utc()
     if args.message:
         entry.setdefault("updates", []).append({"at": now_utc(), "message": args.message})
     save(entries)
@@ -138,6 +161,7 @@ def main():
     o.add_argument("--severity", help=f"One of {SEVERITIES}.")
     o.add_argument("--components", nargs="+", help="e.g. apis frontends")
     o.add_argument("--start", help="ISO-8601 UTC. Default: now. Use for scheduled maintenance.")
+    o.add_argument("--resolved", help="ISO-8601 UTC. Default: now. Only with a terminal status.")
     o.add_argument("--message", help="First update message.")
     o.set_defaults(func=cmd_open)
 
@@ -145,6 +169,7 @@ def main():
     u.add_argument("id")
     u.add_argument("--message")
     u.add_argument("--status", help=f"Incident: {STATUSES['incident']}. Maintenance: {STATUSES['maintenance']}.")
+    u.add_argument("--resolved", help="ISO-8601 UTC. Default: now. Only with a terminal status.")
     u.set_defaults(func=cmd_update)
 
     args = p.parse_args()

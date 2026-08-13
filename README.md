@@ -126,7 +126,7 @@ Both incidents and maintenance windows live in [incidents/incidents.json](incide
 2. Open a PR, get it reviewed, merge to `main`.
 3. The **Deploy** workflow uploads it to the data bucket. The live page polls `incidents.json` every 60 s, so it appears within ~1 minute of deploy.
 
-The helper script handles UTC timestamps, status validation, and auto-fills `resolved_at` on close:
+The helper script handles UTC timestamps, status validation, and fills `resolved_at` on close — with *now* by default, or with `--resolved <ISO-8601 UTC>` when you're writing the entry up after the fact. `--resolved` requires a terminal status and rejects a time earlier than `started_at`; passing it alone also corrects a `resolved_at` an earlier close stamped wrong. Note that `updates[].at` is always *now* — backdate those by hand if the timeline matters.
 
 ```bash
 # Open a new incident
@@ -142,6 +142,11 @@ python scripts/incident.py update 2026-05-15-api-degraded \
 # Close it
 python scripts/incident.py update 2026-05-15-api-degraded \
     --status resolved --message "Resolved after rolling restart."
+
+# Close it with the real recovery time (when posting after the fact)
+python scripts/incident.py update 2026-05-15-api-degraded \
+    --status resolved --resolved 2026-05-15T22:00:00Z \
+    --message "Resolved after rolling restart."
 
 # Schedule a maintenance window
 python scripts/incident.py open 2026-06-01-db-upgrade \
