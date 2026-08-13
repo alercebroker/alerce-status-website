@@ -1,8 +1,8 @@
 {
   "thresholds": {
-    "latency_degraded_ms": 4000,
-    "latency_outage_ms": 10000,
-    "timeout_s": 15
+    "latency_degraded_ms": 3000,
+    "latency_outage_ms": 4000,
+    "timeout_s": 5
   },
   "components": [
     {
@@ -22,7 +22,9 @@
       "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aaawjhl/lightcurve",
       "method": "GET",
       "expected_status": [200, 404],
-      "latency_degraded_ms": 6000
+      "latency_degraded_ms": 6000,
+      "latency_outage_ms": 9500,
+      "timeout_s": 10
     },
     {
       "id": "api-ztf-magstats",
@@ -49,7 +51,10 @@
       "description": "Light-curve features used as input to ALeRCE classifiers.",
       "url": "https://api.alerce.online/ztf/v1/objects/ZTF18aaawjhl/features",
       "method": "GET",
-      "expected_status": [200, 404]
+      "expected_status": [200, 404],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 8
     },
     {
       "id": "api-ztf-classifiers",
@@ -77,7 +82,9 @@
       "url": "https://api.alerce.online/v2/lightcurve/lightcurve/ZTF18aaawjhl",
       "method": "GET",
       "expected_status": [200],
-      "latency_degraded_ms": 6000
+      "latency_degraded_ms": 6000,
+      "latency_outage_ms": 9500,
+      "timeout_s": 10
     },
     {
       "id": "api-ztf-object-list",
@@ -110,12 +117,13 @@
       "id": "api-crossmatch",
       "label": "Crossmatch backend (catshtm)",
       "group": "apis",
-      "description": "Direct all-catalog cone-search against the catshtm backend (Gaia, AllWISE, etc.) — the service behind the object-page crossmatch. Answers in ~100 ms when healthy and hangs outright when not, so it keeps only a raised timeout, to still record a latency for a hung request instead of a null.",
+      "description": "Direct all-catalog cone-search against the catshtm backend (Gaia, AllWISE, etc.) — the service behind the object-page crossmatch. Answers in ~100 ms when healthy and hangs outright when not, so it keeps a raised timeout, to still record a latency for a slow-but-completing request instead of a null.",
       "url": "https://catshtm.alerce.online/crossmatch_all?ra=86.4547530670479&dec=44.65756277176393&radius=20",
       "method": "GET",
       "expected_status": [200],
-      "latency_degraded_ms": 5000,
-      "timeout_s": 20
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 12
     },
     {
       "id": "api-ztf-htmx-object",
@@ -124,19 +132,22 @@
       "description": "Object metadata panel (HTMX) rendered on the ZTF object page.",
       "url": "https://api.alerce.online/v2/object_details/htmx/object/ZTF18aaawjhl",
       "method": "GET",
-      "expected_status": [200]
+      "expected_status": [200],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 8
     },
     {
       "id": "api-ztf-htmx-lightcurve",
       "label": "ZTF Object Page — Lightcurve",
       "group": "apis",
-      "description": "Light-curve widget (HTMX) rendered on the ZTF object page. Heavy for high-detection objects, so it carries its own latency limits.",
+      "description": "Light-curve widget (HTMX) rendered on the ZTF object page. Heavier than the other object-page panels, so it carries its own latency limits.",
       "url": "https://api.alerce.online/v2/lightcurve/htmx/lightcurve?oid=ZTF18aaawjhl",
       "method": "GET",
       "expected_status": [200],
       "latency_degraded_ms": 8000,
-      "latency_outage_ms": 15000,
-      "timeout_s": 20
+      "latency_outage_ms": 9500,
+      "timeout_s": 10
     },
     {
       "id": "api-ztf-htmx-magstats",
@@ -172,7 +183,10 @@
       "description": "Transient Name Server lookup (HTMX) rendered on the ZTF object page.",
       "url": "https://api.alerce.online/v2/object_details/htmx/tns/?ra=86.4547530670479&dec=44.65756277176393",
       "method": "GET",
-      "expected_status": [200]
+      "expected_status": [200],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 8
     },
     {
       "id": "lsst-object-information",
@@ -192,8 +206,8 @@
       "method": "GET",
       "expected_status": [200],
       "latency_degraded_ms": 20000,
-      "latency_outage_ms": 30000,
-      "timeout_s": 35
+      "latency_outage_ms": 26000,
+      "timeout_s": 28
     },
     {
       "id": "lsst-object-list-night",
@@ -220,7 +234,10 @@
       "description": "Light-curve widget (HTMX) for multi-survey / LSST objects.",
       "url": "https://api-lsst.alerce.online/lightcurve_api/htmx/lightcurve?oid=170591527609303944&survey_id=lsst",
       "method": "GET",
-      "expected_status": [200]
+      "expected_status": [200],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 7000,
+      "timeout_s": 7
     },
     {
       "id": "lsst-magstats",
@@ -253,11 +270,13 @@
       "id": "lsst-crossmatch",
       "label": "Crossmatch",
       "group": "apis_lsst",
-      "description": "External-catalog crossmatch (HTMX) for multi-survey / LSST objects. Fast (~0.7 s) in front of the catshtm service but hangs outright when that backend is down, so it keeps only a raised timeout, to still record a latency for a hung request instead of a null.",
+      "description": "External-catalog crossmatch (HTMX) for multi-survey / LSST objects. Fast (~0.7 s) in front of the catshtm service but hangs outright when that backend is down, so it keeps a raised timeout, to still record a latency for a slow-but-completing request instead of a null.",
       "url": "https://api-lsst.alerce.online/crossmatch_api/htmx/crossmatch?oid=170591527609303944&survey_id=lsst",
       "method": "GET",
       "expected_status": [200],
-      "timeout_s": 20
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 12
     },
     {
       "id": "tap-availability",
@@ -275,7 +294,10 @@
       "description": "Synchronous ADQL query against the ztf schema (indexed object lookup) — the query path users migrating off direct SQL connections depend on. Exercises the full TAP → database round trip.",
       "url": "https://tap.alerce.online/tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=csv&QUERY=SELECT+TOP+1+oid,meanra,meandec+FROM+ztf.object+WHERE+oid%3D%27ZTF18aaawjhl%27",
       "method": "GET",
-      "expected_status": [200]
+      "expected_status": [200],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 8
     },
     {
       "id": "tap-adql-multisurvey",
@@ -284,7 +306,10 @@
       "description": "Synchronous ADQL query against the alerce_tap schema (indexed object lookup) — the multi-survey catalog served to IVOA clients such as TOPCAT, pyvo and astroquery.",
       "url": "https://tap.alerce.online/tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=csv&QUERY=SELECT+TOP+1+oid,meanra,meandec+FROM+alerce_tap.object+WHERE+oid%3D170591527609303944",
       "method": "GET",
-      "expected_status": [200]
+      "expected_status": [200],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 8
     },
     {
       "id": "tap-adql-conesearch",
@@ -293,7 +318,10 @@
       "description": "Positional ADQL query (CONTAINS / CIRCLE) over the ztf schema — the spatial-index path behind cone searches and cross-matches, and the most common query shape in VO tooling.",
       "url": "https://tap.alerce.online/tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=csv&QUERY=SELECT+TOP+5+oid+FROM+ztf.object+WHERE+CONTAINS(POINT(%27ICRS%27,meanra,meandec),CIRCLE(%27ICRS%27,86.4547530670479,44.65756277176393,0.02))%3D1",
       "method": "GET",
-      "expected_status": [200]
+      "expected_status": [200],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 8
     },
     {
       "id": "users-api-current",

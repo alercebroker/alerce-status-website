@@ -62,10 +62,21 @@ resource "aws_lambda_function" "prober" {
   runtime          = "python3.12"
   filename         = data.archive_file.prober.output_path
   source_code_hash = data.archive_file.prober.output_base64sha256
-  # Probes run sequentially and some endpoints are legitimately slow (all-catalog
-  # crossmatch ~20 s, object-ranking ~13 s), so a full run can take ~2-3 min.
-  # Well under the 5-min schedule, so invocations never overlap.
-  timeout          = 240
+  # This is a CEILING on the sum of every per-probe timeout_s in lambda/config.json,
+  # not just a per-run allowance: probes run sequentially, so a broad outage in which
+  # every endpoint hangs to its own socket timeout costs their sum. Overrun it and the
+  # run is killed mid-probe having written nothing -- no status.json, no uptime slot,
+  # and no probe_latency logs either, since those are emitted only after every probe
+  # returns. That happened: the config summed to 575 s here, and 72 of 2073 runs in the
+  # week to 13/08/2026 died at the wall. The config was recalibrated from Lambda-side
+  # latency logs to a 252 s budget, and test_real_config_timeout_budget_fits_the_lambda
+  # _timeout reads this very number to keep the invariant enforced.
+  #
+  # 270 leaves ~18 s over that budget for the S3 reads/writes and the SNS publish
+  # (~3.2 s measured). Do not raise it to or past 300: the schedule is every 5 minutes
+  # and overlapping runs would probe the shared pgbouncer pool concurrently, which is
+  # exactly what max_workers=1 exists to prevent. Adding probes eats the 29 s.
+  timeout          = 270
   # Still 1024 deliberately. This was sized for the OLD per-sample history.json,
   # whose read-modify-write measured 421.8 MB of peak interpreter memory at steady
   # state (256 MB OOM'd once ~350 k entries had accumulated). uptime.json's
