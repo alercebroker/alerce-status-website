@@ -240,8 +240,14 @@ function renderStaleWarning(updatedAt) {
   const el = document.getElementById("stale-warning");
   if (!el) return;
   if (!updatedAt) { el.style.display = "none"; return; }
+  // updated_at is stamped *before* the probe run, not after (see prober.handler),
+  // so the freshest published file is already one run-duration old. Its age then
+  // climbs for a full 5-minute cycle until the next run publishes. A 5-minute
+  // threshold therefore fired on every healthy cycle; 7 minutes leaves room for
+  // the 5-minute schedule plus a slow-but-successful run, and still catches a
+  // genuinely missed cycle (which puts the age past 10 minutes).
   const ageSec = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 1000);
-  if (ageSec < 5 * 60) { el.style.display = "none"; return; }
+  if (ageSec < 7 * 60) { el.style.display = "none"; return; }
   const ageMin = Math.floor(ageSec / 60);
   el.style.display = "block";
   el.className = "stale-warning " + (ageSec > 15 * 60 ? "error" : "warn");
