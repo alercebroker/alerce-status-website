@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "id": "2026-08-10-santiago-power-outage",
+    "title": "Power outage at our Santiago datacenter",
+    "status": "resolved",
+    "started_at": "2026-08-10T17:25:00Z",
+    "severity": "critical",
+    "components": [
+      "apis",
+      "apis_lsst",
+      "apis_other",
+      "tap"
+    ],
+    "updates": [
+      {
+        "at": "2026-08-13T21:29:58Z",
+        "message": "A power outage at our datacenter in Santiago on Monday 10 August, ~13:30 local time (17:30 UTC), caused intermittent outages and degradation across most ALeRCE services through Tuesday 11 August. Power and all services were restored on Tuesday afternoon."
+      }
+    ],
+    "resolved_at": "2026-08-11T20:35:00Z"
+  }
+]
