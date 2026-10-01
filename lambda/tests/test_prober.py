@@ -236,6 +236,48 @@ def test_probe_uses_default_timeout_when_not_overridden(monkeypatch):
     assert captured["timeout"] == prober.DEFAULT_TIMEOUT_S
 
 
+def test_probe_post_sends_empty_body_with_content_length_zero():
+    """A `"method": "POST"` component (lsst-aladin) goes out as a bodyless POST that
+    still carries `Content-Length: 0` — some servers reject a POST without one.
+
+    urllib adds no Content-Length itself when there is no body; http.client does,
+    for methods that expect a body. That is an implicit stdlib behaviour, so this
+    checks the real bytes on the wire against a local server rather than a mock.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen["method"] = self.command
+            seen["path"] = self.path
+            seen["content_length"] = self.headers.get("Content-Length")
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        comp = _make_component()
+        comp.update({"method": "POST",
+                     "url": f"http://127.0.0.1:{server.server_port}/card?oid=1&survey=lsst"})
+        result = prober.probe(comp, THRESHOLDS)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert result["status"] == "operational"
+    assert result["http_code"] == 200
+    assert seen == {"method": "POST", "path": "/card?oid=1&survey=lsst", "content_length": "0"}
+
+
 # --- private latency logging (CloudWatch) ---
 
 def test_log_response_times_emits_one_json_line_per_component(capsys):
