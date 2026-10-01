@@ -253,7 +253,7 @@
       "label": "Probabilities",
       "group": "apis_lsst",
       "description": "Classifier probabilities (HTMX) for multi-survey / LSST objects.",
-      "url": "https://api-lsst.alerce.online/probability_api/htmx/probabilities/170591527609303944",
+      "url": "https://api-lsst.alerce.online/probability_api/htmx/probabilities/170591527609303944?survey=lsst",
       "method": "GET",
       "expected_status": [200]
     },
