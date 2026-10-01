@@ -279,6 +279,15 @@
       "timeout_s": 12
     },
     {
+      "id": "lsst-aladin",
+      "label": "Aladin Sky Viewer",
+      "group": "apis_lsst",
+      "description": "Aladin sky-viewer card (HTMX) for multi-survey / LSST objects — the server-rendered card with the object's coordinates; the Aladin Lite viewer itself loads from CDS. The object page loads it with a POST, so it is probed with an empty POST (the optional objects_arr form field omitted); a GET to this route returns 404.",
+      "url": "https://api-lsst.alerce.online/aladin_api/htmx/aladin?oid=170591527609303944&survey=lsst",
+      "method": "POST",
+      "expected_status": [200]
+    },
+    {
       "id": "tap-availability",
       "label": "TAP Service Availability",
       "group": "tap",
