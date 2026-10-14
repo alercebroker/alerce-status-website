@@ -288,6 +288,18 @@
       "expected_status": [200]
     },
     {
+      "id": "lsst-tns",
+      "label": "TNS",
+      "group": "apis_lsst",
+      "description": "Transient Name Server lookup (HTMX) for multi-survey / LSST objects, at the coordinates of the probe object. The same lookup as the ZTF object page's TNS panel, mounted on the multi-survey object service, so it carries the same latency limits.",
+      "url": "https://api-lsst.alerce.online/object_api/htmx/tns/?ra=305.5822327501884&dec=-18.7909207179724",
+      "method": "GET",
+      "expected_status": [200],
+      "latency_degraded_ms": 4000,
+      "latency_outage_ms": 8000,
+      "timeout_s": 8
+    },
+    {
       "id": "tap-availability",
       "label": "TAP Service Availability",
       "group": "tap",
