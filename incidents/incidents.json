@@ -22,7 +22,7 @@
   {
     "id": "2026-10-21-tap-ivoa-outage",
     "title": "TAP service unavailable: an external website it needs at startup is down",
-    "status": "identified",
+    "status": "resolved",
     "started_at": "2026-10-21T21:20:00Z",
     "severity": "major",
     "components": [
@@ -32,7 +32,12 @@
       {
         "at": "2026-10-21T22:10:44Z",
         "message": "Since about 18:20 Chilean time today (21:20 UTC), the TAP service (tap.alerce.online) is unavailable and returns errors. The cause is outside ALeRCE: every time our TAP server starts, it downloads a set of standard vocabulary files from the International Virtual Observatory Alliance website (www.ivoa.net). That website is currently unreachable, so our server cannot finish starting. All other ALeRCE services (APIs and web interfaces) are working normally. TAP should come back on its own once www.ivoa.net is reachable again. We are also preparing a fix so the TAP service no longer depends on www.ivoa.net to start."
+      },
+      {
+        "at": "2026-10-22T12:59:20Z",
+        "message": "Resolved. The TAP service (tap.alerce.online) has been working normally since about 06:35 Chilean time on 22 October (09:35 UTC), when www.ivoa.net became reachable again. We have also deployed the fix: our TAP server now keeps its own copy of those vocabulary files, so it no longer needs www.ivoa.net to start, and an outage of that website can no longer take TAP down."
       }
-    ]
+    ],
+    "resolved_at": "2026-10-22T09:35:00Z"
   }
 ]
